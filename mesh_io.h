@@ -1,8 +1,7 @@
 #ifndef __MPI_MESH_IO_H__
 #define __MPI_MESH_IO_H__
 
-/* Mesh IO - a smaller wrapper around MPI-IO to efficiently read and
-   write mesh data.
+/* Mesh IO - a small wrapper around MPI-IO to efficiently read and write mesh data.
 
    Ed Karrels, edk@illinois.edu, 2016
 */
