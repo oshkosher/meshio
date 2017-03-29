@@ -244,6 +244,7 @@ void testWriteSimple(MPI_File fh) {
   int array[4], array0[4] = {0, 0, 0, 0}, array1[4] = {1000, 2000, 3000, 4000};
   int err, start=0, length=4;
   FILE *f;
+  size_t read_len;
 
   /* fill the file with zeros */
   f = fopen(FILENAME, "wb");
@@ -259,7 +260,8 @@ void testWriteSimple(MPI_File fh) {
   /* check the file contents */
   f = fopen(FILENAME, "rb");
   memset(array, 0xff, sizeof(array));
-  fread(array, sizeof(int), 4, f);
+  read_len = fread(array, sizeof(int), 4, f);
+  assert(read_len == 4);
   fclose(f);
   assert(0 == memcmp(array, array1, sizeof(array)));
 
@@ -272,6 +274,7 @@ void testWriteOffset(MPI_File fh) {
   int err, start=0, length=4;
   char chars[3], chars1[3] = {12, 13, 14};
   FILE *f;
+  size_t read_len;
 
   /* fill the file with a header and zeros */
   f = fopen(FILENAME, "wb");
@@ -289,8 +292,10 @@ void testWriteOffset(MPI_File fh) {
   f = fopen(FILENAME, "rb");
   memset(chars, 0xff, sizeof(chars));
   memset(array, 0xff, sizeof(array));
-  fread(chars, 1, 3, f);
-  fread(array, sizeof(int), 4, f);
+  read_len = fread(chars, 1, 3, f);
+  assert(read_len == 3);
+  read_len = fread(array, sizeof(int), 4, f);
+  assert(read_len == 4);
   fclose(f);
   assert(0 == memcmp(chars, chars1, sizeof(chars)));
   assert(0 == memcmp(array, array1, sizeof(array)));
@@ -309,6 +314,7 @@ void testWritePartial(MPI_File fh) {
   int file_mesh_starts[3] = {2, 3, 5};
   int i, j, k, err;
   FILE *inf;
+  size_t read_len;
 
   if (rank != 0) return;
   
@@ -318,7 +324,8 @@ void testWritePartial(MPI_File fh) {
   /* test contents before */
   inf = fopen(FILENAME, "rb");
   fseek(inf, FILE_HEADER_LEN, SEEK_SET);
-  fread(full_mesh, sizeof(double), 10*10*10, inf);
+  read_len = fread(full_mesh, sizeof(double), 10*10*10, inf);
+  assert(read_len == 10*10*10);
   fclose(inf);
   for (i=0; i < 10; i++)
     for (j=0; j < 10; j++)
@@ -344,7 +351,8 @@ void testWritePartial(MPI_File fh) {
   /* test contents after */
   inf = fopen(FILENAME, "rb");
   fseek(inf, FILE_HEADER_LEN, SEEK_SET);
-  fread(full_mesh, sizeof(double), 10*10*10, inf);
+  read_len = fread(full_mesh, sizeof(double), 10*10*10, inf);
+  assert(read_len == 10*10*10);
   fclose(inf);
   for (i=0; i < 10; i++)
     for (j=0; j < 10; j++)
@@ -385,6 +393,7 @@ void testWriteEndian(MPI_File fh) {
   int file_mesh_starts[2] = {0, 1};
   int i, err;
   FILE *inf;
+  size_t read_len;
 
 
   /* fill the first row of the file with 12345.0 */
@@ -412,7 +421,8 @@ void testWriteEndian(MPI_File fh) {
   inf = fopen(FILENAME, "rb");
   for (i=0; i < 10; i++) mesh[i] = 12345;
   fseek(inf, FILE_HEADER_LEN, SEEK_SET);
-  fread(mesh, sizeof(double), 10, inf);
+  read_len = fread(mesh, sizeof(double), 10, inf);
+  assert(read_len == 10);
   fclose(inf);
 
   assert(mesh[0] == 12345.0);
