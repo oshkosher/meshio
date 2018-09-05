@@ -203,7 +203,7 @@ int Mesh_IO_write
                       doEndianSwap ? NULL : &memory_type,
                       &element_size);
   if (err != MPI_SUCCESS) {
-    printf("readWriteInit error %d\n", err);
+    /* printf("readWriteInit error %d\n", err); */
     return err;
   }
 
@@ -291,6 +291,16 @@ static int readWriteInit
 
   /* check for mesh boundary errors */
   for (i=0; i < ndims; i++) {
+    /*
+    assert(!(file_mesh_starts[i] < 0));
+    assert(!(file_mesh_starts[i] + mesh_sizes[i] > file_mesh_sizes[i]));
+    assert(!(memory_mesh_starts[i] < 0));
+    assert(!(memory_mesh_starts[i] + mesh_sizes[i] > memory_mesh_sizes[i]));
+    assert(!(!(file_array_order == MPI_ORDER_FORTRAN ||
+             file_array_order == MPI_ORDER_C)));
+    assert(!(!(memory_array_order == MPI_ORDER_FORTRAN ||
+             memory_array_order == MPI_ORDER_C)));
+    */
     if (file_mesh_starts[i] < 0
         || file_mesh_starts[i] + mesh_sizes[i] > file_mesh_sizes[i]
         || memory_mesh_starts[i] < 0
@@ -299,8 +309,9 @@ static int readWriteInit
              file_array_order == MPI_ORDER_C)
         || !(memory_array_order == MPI_ORDER_FORTRAN ||
              memory_array_order == MPI_ORDER_C)
-        )
+        ) {
       return MPI_ERR_ARG;
+    }
   }
 
   /* get the size of each element */

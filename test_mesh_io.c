@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
+#include <stdint.h>
 #include "reverse_bytes.h"
 #include "mesh_io.h"
 #include "mpi.h"
@@ -9,11 +11,15 @@
 int rank, np;
 
 #define FILENAME "test_mesh_io.tmp"
+#define KB ((uint64_t)1024)
+#define MB ((uint64_t)1024*1024)
+#define GB ((uint64_t)1024*1024*1024)
 int FILE_HEADER_LEN = 16;
 int simple_file_size[3] = {10, 10, 10};
 
 
 int isBigEndian();
+int anyFailed(int fail);
 // create test datafile
 void createFile();
 void testReadSimple(MPI_File fh);
@@ -23,6 +29,7 @@ void testWriteSimple(MPI_File fh);
 void testWriteOffset(MPI_File fh);
 void testWritePartial(MPI_File fh);
 void testWriteEndian(MPI_File fh);
+void testLargeAccess(MPI_File fh);
 const char *getErrorName(int mpi_err);
 void reportError(const char *msg, int mpi_err);
 
@@ -35,17 +42,22 @@ int main(int argc, char **argv) {
 
   if (rank == 0) createFile();
 
-  MPI_File_open(MPI_COMM_WORLD, FILENAME, MPI_MODE_RDONLY, MPI_INFO_NULL, &fh);
-  testReadSimple(fh);
-  testReadWithHalo(fh);
-  testCopyToLinear();
-  MPI_File_close(&fh);
+  if (np < 2) {
+    MPI_File_open(MPI_COMM_WORLD, FILENAME, MPI_MODE_RDONLY, MPI_INFO_NULL, &fh);
+    testReadSimple(fh);
+    testReadWithHalo(fh);
+    testCopyToLinear();
+    MPI_File_close(&fh);
+  }
 
   MPI_File_open(MPI_COMM_WORLD, FILENAME, MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
-  testWriteSimple(fh);
-  testWriteOffset(fh);
-  testWritePartial(fh);
-  testWriteEndian(fh);
+  if (np < 2) {
+    testWriteSimple(fh);
+    testWriteOffset(fh);
+    testWritePartial(fh);
+    testWriteEndian(fh);
+  }
+  testLargeAccess(fh);
   MPI_File_close(&fh);
 
   if (rank == 0) remove(FILENAME);
@@ -57,6 +69,14 @@ int main(int argc, char **argv) {
 int isBigEndian() {
   int tmp = 1;
   return ! *(char*) &tmp;
+}
+
+
+int anyFailed(int fail) {
+  int any_fail;
+
+  MPI_Allreduce(&fail, &any_fail, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+  return any_fail;
 }
 
 
@@ -363,13 +383,14 @@ void testWritePartial(MPI_File fh) {
             && j >= file_mesh_starts[1]
             && j < file_mesh_starts[1] + mesh_sizes[1]
             && k >= file_mesh_starts[2]
-            && k < file_mesh_starts[2] + mesh_sizes[2])
+            && k < file_mesh_starts[2] + mesh_sizes[2]) {
           assert(full_mesh[i][j][k] ==
                  2 * ((i-file_mesh_starts[0])*10000
                       + (j-file_mesh_starts[1]) * 100
                       + (k-file_mesh_starts[2])));
-        else
+        } else {
           assert(full_mesh[i][j][k] == i*10000 + j * 100 + k);
+        }
 
         /*
         if (full_mesh[i][j][k] != i*10000 + j * 100 + k) {
@@ -437,3 +458,69 @@ void testWriteEndian(MPI_File fh) {
   printf("testWriteEndian ok\n");
 }
 
+
+/* Test reads and writes of 1GB and 4GB */
+void testLargeAccess(MPI_File fh) {
+  int *buf;
+  int fail = 0, result;
+  int cols, rows;
+  int64_t bytes_per_process;
+  int mesh_sizes[2], file_mesh_sizes[2], file_mesh_starts[2];
+  int memory_mesh_sizes[2], memory_mesh_starts[2] = {0, 0};
+
+  /* write two rows of data, so it will need to be reordered
+     2.001 works (2 * 268569673 = 2GiB + 1073736)
+     but 2.01 doesnt (2 * 269777633 = 2GiB + 10737416)
+  */
+  bytes_per_process = 2.01 * GB;
+  rows = 2;
+  cols = bytes_per_process / (rows * sizeof(int));
+  bytes_per_process = rows * cols * sizeof(int);
+  
+  if (rank==0)
+    printf("Writing %d x %d array of ints: %" PRIu64 " bytes per process\n",
+           rows, cols, bytes_per_process);
+
+  /* allocate buffer */
+  buf = (int*) calloc(1, bytes_per_process);
+  if (!buf) {
+    fprintf(stderr, "%d: Failed to allocate %" PRIu64 
+            " bytes for testLargeAccess\n",
+            rank, bytes_per_process);
+    fail = 1;
+  }
+  
+  if (anyFailed(fail)) return;
+
+  mesh_sizes[0] = rows;
+  mesh_sizes[1] = cols;
+
+  file_mesh_sizes[0] = rows;
+  file_mesh_sizes[1] = cols * np;
+
+  file_mesh_starts[0] = 0;
+  file_mesh_starts[1] = cols * rank;
+  
+  memory_mesh_sizes[0] = mesh_sizes[0];
+  memory_mesh_sizes[1] = mesh_sizes[1];
+  
+  result = Mesh_IO_write(fh, 0, MPI_INT, MESH_IO_IGNORE_ENDIAN, buf,
+                         2, mesh_sizes,
+                         file_mesh_sizes, file_mesh_starts, MPI_ORDER_C, 
+                         memory_mesh_sizes, memory_mesh_starts, MPI_ORDER_C);
+  
+  if (result != MPI_SUCCESS) {
+    fprintf(stderr, "%d: Error writing %" PRIu64 " bytes: %s\n",
+            rank, bytes_per_process, getErrorName(result));
+  } else {
+    fprintf(stderr, "%d: Successfully wrote %" PRIu64 " bytes\n",
+            rank, bytes_per_process);
+  }
+
+  free(buf);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank == 0) {
+    printf("testLargeAccess\n");
+  }
+}

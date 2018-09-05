@@ -1,8 +1,8 @@
 default: all
 
 EXECS=test_mesh_io test_mesh_io_speed
-CFLAGS=-O3 -Wall
-# CFLAGS=-g
+# CFLAGS=-O3 -Wall
+CFLAGS=-g
 LIBS=
 MPICC=mpicc
 CC=gcc
@@ -17,7 +17,11 @@ LIBS=-lrt
 else
 
 # Simple Linux node
+MISSING_MPICC := $(shell which mpicc &>/dev/null; echo $$?)
+ifeq "$(MISSING_MPICC)" "1"
 MPICC=gcc
+endif
+
 LIBS=-lmpi -lm
 CFLAGS += -I/usr/include/mpich -L/usr/lib/mpich
 # CFLAGS += -I/usr/local/mpich-3.2/include -L/usr/local/mpich-3.2/lib
