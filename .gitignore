@@ -1,3 +1,4 @@
 *.o
 test_mesh_io
 test_mesh_io_speed
+*.tmp
