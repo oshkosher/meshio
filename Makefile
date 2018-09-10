@@ -1,8 +1,8 @@
 default: all
 
-EXECS=test_mesh_io test_mesh_io_speed
+EXECS=test_mesh_io test_mesh_io_speed test_subarrays
 # CFLAGS=-O3 -Wall
-CFLAGS=-g
+CFLAGS=-g -Wall -std=c90
 LIBS=
 MPICC=mpicc
 CC=gcc
@@ -42,6 +42,10 @@ test_mesh_io: test_mesh_io.c mesh_io.o reverse_bytes.o
 test_mesh_io_speed: test_mesh_io_speed.c mesh_io.o reverse_bytes.o
 	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
 
+test_subarrays: test_subarrays.c
+	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
+
 clean:
-	rm -f $(EXECS) *.o *~ test_mesh_io_speed.out
+	rm -f $(EXECS) *.o *~ test_mesh_io_speed.out test_*.tmp \
+	  *.exe *.stackdump
 

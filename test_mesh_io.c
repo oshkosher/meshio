@@ -20,7 +20,6 @@ int simple_file_size[3] = {10, 10, 10};
 
 int isBigEndian();
 int anyFailed(int fail);
-// create test datafile
 void createFile();
 void testReadSimple(MPI_File fh);
 void testReadWithHalo(MPI_File fh);
