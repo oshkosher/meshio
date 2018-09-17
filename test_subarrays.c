@@ -45,6 +45,7 @@ void printArgs(Options *opt);
 double *createArray(Options *opt);
 int createTypes(MPI_Datatype *file_type, MPI_Datatype *memory_type,
                 Options *opt);
+int64_t tileBytes(Options *opt);
 void testWrite(MPI_File *fh, Options *opt, double *array,
                MPI_Datatype memory_type);
 void testRead(MPI_File *fh, Options *opt, double *array,
@@ -55,7 +56,7 @@ const char *getErrorName(int mpi_err);
 int main(int argc, char **argv) {
   Options opt;
   MPI_File fh;
-  int err, result = 1;
+  int result = 1;
   double *array = NULL;
   MPI_Datatype file_type, memory_type;
 
@@ -68,10 +69,9 @@ int main(int argc, char **argv) {
   
   printArgs(&opt);
 
-  int result2 = MPI_File_open(MPI_COMM_WORLD, opt.filename,
-                             MPI_MODE_RDWR | MPI_MODE_CREATE,
-                             MPI_INFO_NULL, &fh);
-  printf("MPI_File_open result = %d\n", result2);
+  MPI_File_open(MPI_COMM_WORLD, opt.filename,
+                MPI_MODE_RDWR | MPI_MODE_CREATE,
+                MPI_INFO_NULL, &fh);
 
   array = createArray(&opt);
   if (anyFailed(array == NULL))
@@ -80,17 +80,12 @@ int main(int argc, char **argv) {
   if (anyFailed(createTypes(&file_type, &memory_type, &opt)))
     goto fail;
 
-  err = MPI_File_set_view(fh, 0, file_type, file_type, "native",
-                          MPI_INFO_NULL);
-  if (err != MPI_SUCCESS) {
-    printf("%d: Failed to set file view %s\n", rank, opt.filename);
-    goto fail;
-  }
+  MPI_File_set_view(fh, 0, file_type, file_type, "native", MPI_INFO_NULL);
 
   testWrite(&fh, &opt, array, memory_type);
   testRead(&fh, &opt, array, memory_type);
 
-  /* if (rank == 0) remove(opt.filename); */
+  if (rank == 0) remove(opt.filename);
   result = 0;
   
  fail:
@@ -115,7 +110,7 @@ void printHelp() {
             "   -file <filename>\n"
             "     Set the name of the test file.\n"
             "     Default = test_subarrays.tmp\n"
-            "   -shape: tall, wide, or grid."
+            "   -shape: tall, wide, or grid.\n"
             "     tall: tiles are stacked vertically, so each process will\n"
             "       access one contiguous strip of data.\n"
             "     wide: tiles are stacked horizontally, so each row will contain\n"
@@ -124,6 +119,7 @@ void printHelp() {
             "     Default = wide.\n"
             "\n");
   }
+  MPI_Finalize();
   exit(1);
 }
   
@@ -138,8 +134,12 @@ int parseArgs(Options *opt, int argc, char **argv) {
   
   for (argno=1; argno < argc; argno++) {
     const char *arg = argv[argno];
-    
-    if (!strcmp(arg, "-size")) {
+
+    if (!strcmp(arg, "-h")) {
+      printHelp();
+    }
+
+    else if (!strcmp(arg, "-size")) {
       if (argc - argno < 1) printHelp();
       arg = argv[++argno];
       const char *x = strchr(arg, 'x');
@@ -186,6 +186,10 @@ int parseArgs(Options *opt, int argc, char **argv) {
         printHelp();
       }
     }
+
+    else {
+      printHelp();
+    }
   }
   
   /* if the size is specified in bytes, split that into square tiles of
@@ -212,6 +216,7 @@ int parseArgs(Options *opt, int argc, char **argv) {
     opt->global_width = opt->tile_width;
     opt->tile_top = opt->tile_height * rank;
     opt->tile_left = 0;
+    break;
     
   case SHAPE_GRID:
     {
@@ -236,8 +241,10 @@ void printArgs(Options *opt) {
   int i;
 
   if (rank == 0) {
-    printf("tiles %dx%d, %ld bytes\n", opt->tile_height, opt->tile_width,
-           (long)(sizeof(element_type) * opt->tile_height * opt->tile_width));
+    int64_t bytes = tileBytes(opt);
+    printf("tiles %dx%d, %ld bytes, %.3f GiB\n",
+           opt->tile_height, opt->tile_width,
+           (long)bytes, bytes / (1024. * 1024 * 1024));
     printf("overall %ldx%ld\n", 
            (long)opt->global_height, (long)opt->global_width);
   }
@@ -254,7 +261,7 @@ void printArgs(Options *opt) {
 
 
 double *createArray(Options *opt) {
-  size_t array_size = sizeof(double) * opt->tile_height * opt->tile_width;
+  size_t array_size = tileBytes(opt);
   double *array = (double*) malloc(array_size);
 
   if (!array) {
@@ -272,7 +279,6 @@ int createTypes(MPI_Datatype *file_type, MPI_Datatype *memory_type,
   int file_mesh_starts[2] = {opt->tile_top, opt->tile_left};
   int memory_mesh_sizes[2] = {opt->tile_height, opt->tile_width};
   int memory_mesh_starts[2] = {0, 0};
-  int err;
 
   /*
 printf("%d: MPI_Type_create_subarray(2, [%d,%d], [%d,%d], [%d,%d]...\n",
@@ -280,43 +286,34 @@ printf("%d: MPI_Type_create_subarray(2, [%d,%d], [%d,%d], [%d,%d]...\n",
          mesh_sizes[0], mesh_sizes[1],
          file_mesh_starts[0], file_mesh_starts[1]);
   */
-  err = MPI_Type_create_subarray(2, file_mesh_sizes, mesh_sizes,
-                                 file_mesh_starts,
-                                 MPI_ORDER_C, MPI_DOUBLE, file_type);
-  if (err != MPI_SUCCESS) {
-    printf("%d: failed to create file type\n", rank);
-    return 1;
-  }
+  MPI_Type_create_subarray(2, file_mesh_sizes, mesh_sizes,
+                           file_mesh_starts,
+                           MPI_ORDER_C, MPI_DOUBLE, file_type);
+  MPI_Type_commit(file_type);
   
-  err = MPI_Type_commit(file_type);
-  if (err != MPI_SUCCESS) {
-    printf("%d: failed to commit file type\n", rank);
-    return 1;
-  }
+  MPI_Type_create_subarray(2, memory_mesh_sizes, mesh_sizes,
+                           memory_mesh_starts,
+                           MPI_ORDER_C, MPI_DOUBLE, memory_type);
   
-  err = MPI_Type_create_subarray(2, memory_mesh_sizes, mesh_sizes,
-                                 memory_mesh_starts,
-                                 MPI_ORDER_C, MPI_DOUBLE, memory_type);
-  if (err != MPI_SUCCESS) {
-    printf("%d: failed to create memory type\n", rank);
-    return 1;
-  }
-  
-  err = MPI_Type_commit(memory_type);
-  if (err != MPI_SUCCESS) {
-    printf("%d: failed to commit memory type\n", rank);
-    return 1;
-  }
+  MPI_Type_commit(memory_type);
 
   return 0;
 }
 
 
+/* returns the number of bytes in a tile */
+int64_t tileBytes(Options *opt) {
+  return sizeof(element_type) * opt->tile_height * opt->tile_width;
+}
+
+
+
 void testWrite(MPI_File *fh, Options *opt, double *array,
                MPI_Datatype memory_type) {
-  int row, col, err;
+  int row, col;
   double *p = array, start_time, elapsed;
   MPI_Status status;
+  double mbps;
   
   for (row=0; row < opt->tile_height; row++) {
     for (col=0; col < opt->tile_width; col++) {
@@ -325,23 +322,47 @@ void testWrite(MPI_File *fh, Options *opt, double *array,
       *p++ = value;
     }
   }
-  printf("%d: [0,3] = %f\n", rank, array[opt->tile_width*0 + 3]);
 
   MPI_Barrier(MPI_COMM_WORLD);
   start_time = MPI_Wtime();
-  err = MPI_File_write_at_all(*fh, 0, array, 1, memory_type, &status);
-  if (err != MPI_SUCCESS) {
-    printf("%d: error %d writing data (%s)\n", rank, err, getErrorName(err));
-  }
+  MPI_File_write_at_all(*fh, 0, array, 1, memory_type, &status);
   MPI_Barrier(MPI_COMM_WORLD);
   elapsed = MPI_Wtime() - start_time;
   
-  if (rank == 0) printf("write time: %.3fs\n", elapsed);
+  mbps = np * tileBytes(opt) / (elapsed * 1024*1024);
+  if (rank == 0) printf("write time: %.3fs, %.3f MiB/s\n", elapsed, mbps);
 }
 
 
 void testRead(MPI_File *fh, Options *opt, double *array,
               MPI_Datatype memory_type) {
+  int row, col;
+  double *p = array, start_time, elapsed;
+  MPI_Status status;
+  double mbps;
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  start_time = MPI_Wtime();
+  MPI_File_read_at_all(*fh, 0, array, 1, memory_type, &status);
+  MPI_Barrier(MPI_COMM_WORLD);
+  elapsed = MPI_Wtime() - start_time;
+
+  mbps = np * tileBytes(opt) / (elapsed * 1024*1024);
+  if (rank == 0) printf("read time: %.3fs, %.3f MiB/s\n", elapsed, mbps);
+  
+  for (row=0; row < opt->tile_height; row++) {
+    for (col=0; col < opt->tile_width; col++) {
+      double expected = (opt->tile_top + row) * 1000000 +
+        (opt->tile_left + col);
+
+      if (*p != expected) {
+        printf("%d: error at [%d,%d]: expected %e, got %e\n", rank, row, col,
+               expected, *p);
+        return;
+      }
+      p++;
+    }
+  }
 
 }
 
