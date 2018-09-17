@@ -68,10 +68,10 @@ int main(int argc, char **argv) {
   
   printArgs(&opt);
 
-  int result2 = MPI_File_open(MPI_COMM_WORLD, opt.filename,
-                             MPI_MODE_RDWR | MPI_MODE_CREATE,
-                             MPI_INFO_NULL, &fh);
-  printf("MPI_File_open result = %d\n", result2);
+  printf("%d: opening file \"%s\"\n", rank, opt.filename);
+  MPI_File_open(MPI_COMM_WORLD, opt.filename,
+                MPI_MODE_RDWR | MPI_MODE_CREATE,
+                MPI_INFO_NULL, &fh);
 
   array = createArray(&opt);
   if (anyFailed(array == NULL))
@@ -138,8 +138,12 @@ int parseArgs(Options *opt, int argc, char **argv) {
   
   for (argno=1; argno < argc; argno++) {
     const char *arg = argv[argno];
+
+    if (!strcmp(arg, "-h")) {
+      printHelp();
+    }
     
-    if (!strcmp(arg, "-size")) {
+    else if (!strcmp(arg, "-size")) {
       if (argc - argno < 1) printHelp();
       arg = argv[++argno];
       const char *x = strchr(arg, 'x');
@@ -318,6 +322,7 @@ void testWrite(MPI_File *fh, Options *opt, double *array,
   double *p = array, start_time, elapsed;
   MPI_Status status;
   
+  fprintf(stderr, "%d: array filling\n", rank);
   for (row=0; row < opt->tile_height; row++) {
     for (col=0; col < opt->tile_width; col++) {
       double value = (opt->tile_top + row) * 1000000 +
@@ -325,7 +330,9 @@ void testWrite(MPI_File *fh, Options *opt, double *array,
       *p++ = value;
     }
   }
-  printf("%d: [0,3] = %f\n", rank, array[opt->tile_width*0 + 3]);
+  fprintf(stderr, "%d: array filled\n", rank);
+  printf("%d: array filled 2\n", rank);
+  /* printf("%d: [0,3] = %f\n", rank, array[opt->tile_width*0 + 3]); */
 
   MPI_Barrier(MPI_COMM_WORLD);
   start_time = MPI_Wtime();
