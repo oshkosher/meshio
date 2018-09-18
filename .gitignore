@@ -4,3 +4,8 @@ test_mesh_io
 test_mesh_io_speed
 test_subarrays
 *.tmp
+*.out
+*.err
+*~
+core
+*.run

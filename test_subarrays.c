@@ -1,6 +1,16 @@
 /*
   Test MPI-IO with large subarrays. Some versions of MPI had problems
   handling more than 2GB in IO calls.
+  
+  On Blue Waters, cray-mpich/7.5.0 (ANL base 3.2rc1)
+  pass:
+    all 2GB, 6GB
+    write 3GB, 4GB
+  fail:
+    read 3GB, 4GB
+  tall/wide doesn't matter
+  
+  Same results on cray-mpich/7.5.3 (ANL base 3.2)
 
   Ed Karrels, edk@illinois.edu, September 2018
 */
@@ -33,7 +43,7 @@ int rank = -1, np = -1;
 typedef double element_type;
 
 typedef struct {
-  int tile_height, tile_width;
+  int tile_height, tile_width, shape;
   int64_t tile_top, tile_left;  /* global location of my tile */
   int64_t global_height, global_width;
   const char *filename;
@@ -52,6 +62,7 @@ void testRead(MPI_File *fh, Options *opt, double *array,
               MPI_Datatype memory_type);
 int anyFailed(int fail);
 const char *getErrorName(int mpi_err);
+const char *shapeName(int shape_enum);
 
 int main(int argc, char **argv) {
   Options opt;
@@ -126,11 +137,11 @@ void printHelp() {
   
 int parseArgs(Options *opt, int argc, char **argv) {
   int argno;
-  int shape = SHAPE_WIDE;
   int64_t size_bytes = (int64_t)4 * 1024 * 1024 * 1024;
   opt->tile_height = opt->tile_width = -1;
   opt->tile_top = opt->tile_left = -1;
   opt->filename = DEFAULT_FILENAME;
+  opt->shape = SHAPE_WIDE;
   
   for (argno=1; argno < argc; argno++) {
     const char *arg = argv[argno];
@@ -177,11 +188,11 @@ int parseArgs(Options *opt, int argc, char **argv) {
       arg = argv[++argno];
       
       if (!strcmp(arg, "tall")) {
-        shape = SHAPE_TALL;
+        opt->shape = SHAPE_TALL;
       } else if (!strcmp(arg, "wide")) {
-        shape = SHAPE_WIDE;
+        opt->shape = SHAPE_WIDE;
       } else if (!strcmp(arg, "grid")) {
-        shape = SHAPE_GRID;
+        opt->shape = SHAPE_GRID;
       } else {
         printHelp();
       }
@@ -203,7 +214,7 @@ int parseArgs(Options *opt, int argc, char **argv) {
   assert(opt->tile_height > 0 && opt->tile_width > 0);
 
   /* compute the total size and my position in it */
-  switch (shape) {
+  switch (opt->shape) {
   case SHAPE_WIDE:
     opt->global_height = opt->tile_height;
     opt->global_width = opt->tile_width * np;
@@ -242,13 +253,15 @@ void printArgs(Options *opt) {
 
   if (rank == 0) {
     int64_t bytes = tileBytes(opt);
-    printf("tiles %dx%d, %ld bytes, %.3f GiB\n",
-           opt->tile_height, opt->tile_width,
+    printf("%d processes, tiles %dx%d, %ld bytes, %.3f GiB\n",
+           np, opt->tile_height, opt->tile_width,
            (long)bytes, bytes / (1024. * 1024 * 1024));
-    printf("overall %ldx%ld\n", 
-           (long)opt->global_height, (long)opt->global_width);
+    printf("overall %ldx%ld %s\n", 
+           (long)opt->global_height, (long)opt->global_width,
+           shapeName(opt->shape));
   }
 
+  /*
   for (i=0; i < np; i++) {
     MPI_Barrier(MPI_COMM_WORLD);
     if (i == rank) {
@@ -257,6 +270,7 @@ void printArgs(Options *opt) {
     }
   }
   MPI_Barrier(MPI_COMM_WORLD);
+  */
 }
 
 
@@ -387,3 +401,15 @@ const char *getErrorName(int mpi_err) {
   default: return NULL;
   }
 }
+
+
+const char *shapeName(int shape_enum) {
+  switch (shape_enum) {
+  case SHAPE_TALL: return "tall";
+  case SHAPE_WIDE: return "wide";
+  case SHAPE_GRID: return "grid";
+  default: return "unknown";
+  }
+}
+
+
