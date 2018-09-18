@@ -3,6 +3,7 @@
 test_mesh_io
 test_mesh_io_speed
 test_subarrays
+test_2gb_io
 *.tmp
 *.out
 *.err

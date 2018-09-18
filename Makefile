@@ -1,6 +1,6 @@
 default: all
 
-EXECS=test_mesh_io test_mesh_io_speed test_subarrays
+EXECS=test_mesh_io test_mesh_io_speed test_subarrays test_2gb_io
 # CFLAGS=-O3 -Wall
 CFLAGS=-g -Wall -std=c90
 LIBS=
@@ -44,6 +44,9 @@ test_mesh_io_speed: test_mesh_io_speed.c mesh_io.o reverse_bytes.o
 	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
 
 test_subarrays: test_subarrays.c
+	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
+
+test_2gb_io: test_2gb_io.c
 	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
 
 clean:
