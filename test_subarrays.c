@@ -2,6 +2,15 @@
   Test MPI-IO with large subarrays. Some versions of MPI had problems
   handling more than 2GB in IO calls.
   
+  On a single machine with mpich-3.2.1
+  pass:
+    all 2GB
+    all tall 3GB or larger (noninterleaved)
+  fail:
+    all wide 3GB or larer (interleaved)
+  
+  With mpich-3.3b3, all passed.
+  
   On Blue Waters, cray-mpich/7.5.0 (ANL base 3.2rc1)
   pass:
     all 2GB, 6GB
@@ -31,15 +40,6 @@ int rank = -1, np = -1;
 #define SHAPE_WIDE 1
 #define SHAPE_GRID 2
 
-#define MPICHECK(CALL) do {                                          \
-  int result = CALL;                                                 \
-  if (result != MPI_SUCCESS) {                                       \
-    fprintf(stderr, "rank=%d %s:%d MPI error %d (%s)\n", rank, __FILE__, __LINE__, \
-            result, getErrorName(result));                           \
-    assert(result == MPI_SUCCESS);                                   \
-  }                                                                  \
-} while (0)
-
 typedef double element_type;
 
 typedef struct {
@@ -61,7 +61,6 @@ void testWrite(MPI_File *fh, Options *opt, double *array,
 void testRead(MPI_File *fh, Options *opt, double *array,
               MPI_Datatype memory_type);
 int anyFailed(int fail);
-const char *getErrorName(int mpi_err);
 const char *shapeName(int shape_enum);
 
 int main(int argc, char **argv) {
@@ -249,8 +248,6 @@ int parseArgs(Options *opt, int argc, char **argv) {
 
 
 void printArgs(Options *opt) {
-  int i;
-
   if (rank == 0) {
     int64_t bytes = tileBytes(opt);
     printf("%d processes, tiles %dx%d, %ld bytes, %.3f GiB\n",
@@ -262,6 +259,7 @@ void printArgs(Options *opt) {
   }
 
   /*
+  int i;
   for (i=0; i < np; i++) {
     MPI_Barrier(MPI_COMM_WORLD);
     if (i == rank) {
@@ -294,12 +292,6 @@ int createTypes(MPI_Datatype *file_type, MPI_Datatype *memory_type,
   int memory_mesh_sizes[2] = {opt->tile_height, opt->tile_width};
   int memory_mesh_starts[2] = {0, 0};
 
-  /*
-printf("%d: MPI_Type_create_subarray(2, [%d,%d], [%d,%d], [%d,%d]...\n",
-         rank, file_mesh_sizes[0], file_mesh_sizes[1],
-         mesh_sizes[0], mesh_sizes[1],
-         file_mesh_starts[0], file_mesh_starts[1]);
-  */
   MPI_Type_create_subarray(2, file_mesh_sizes, mesh_sizes,
                            file_mesh_starts,
                            MPI_ORDER_C, MPI_DOUBLE, file_type);
@@ -386,20 +378,6 @@ int anyFailed(int fail) {
 
   MPI_Allreduce(&fail, &any_fail, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
   return any_fail;
-}
-
-
-const char *getErrorName(int mpi_err) {
-  switch (mpi_err) {
-  case MPI_SUCCESS: return "MPI_SUCCESS";
-  case MPI_ERR_TYPE: return "MPI_ERR_TYPE";
-  case MPI_ERR_BUFFER: return "MPI_ERR_BUFFER";
-  case MPI_ERR_DIMS: return "MPI_ERR_DIMS";
-  case MPI_ERR_ARG: return "MPI_ERR_ARG";
-  case MPI_ERR_TRUNCATE: return "MPI_ERR_TRUNCATE";
-  case MPI_ERR_FILE: return "MPI_ERR_FILE";
-  default: return NULL;
-  }
 }
 
 
