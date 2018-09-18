@@ -22,8 +22,9 @@ ifeq "$(MISSING_MPICC)" "1"
 MPICC=gcc
 endif
 
-LIBS=-lmpi -lm
-CFLAGS += -I/usr/include/mpich -L/usr/lib/mpich
+# LIBS=-lmpi -lm
+LIBS= -lm
+# CFLAGS += -I/usr/include/mpich -L/usr/lib/mpich
 # CFLAGS += -I/usr/local/mpich-3.2/include -L/usr/local/mpich-3.2/lib
 # export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/mpich-3.2/lib
 endif
