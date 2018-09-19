@@ -13,6 +13,7 @@
 
 int rank = -1, np = -1;
 size_t size = (size_t)3000 * 1024 * 1024;
+/* size_t size = (size_t)1 * 1024 * 1024; */
 
 #define DEFAULT_FILENAME "test_2gb_io.tmp"
 
@@ -24,9 +25,9 @@ int main(int argc, char **argv) {
   double *array = NULL;
   const char *filename = DEFAULT_FILENAME;
   MPI_File fh;
-  MPI_Datatype array_type;
+  MPI_Datatype file_type;
   MPI_Status status;
-  int starts[2] = {0,0}, sizes[2];
+  int height, width, starts[2] = {0,0}, sizes[2], file_sizes[2];
 
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &np);
@@ -55,41 +56,63 @@ int main(int argc, char **argv) {
   
   /* initialize array */
   for (i=0; i < count; i++)
-    array[i] = i;
+    array[i] = i + rank*1000000;
   
   MPI_File_set_view(fh, 0, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
 
   /* write 1-D array */
-  MPI_File_write_at(fh, 0, array, count, MPI_DOUBLE, &status);
+  /* MPI_File_write_at(fh, count*rank, array, count, MPI_DOUBLE, &status); */
+  MPI_File_write_at_all(fh, count*rank, array, count, MPI_DOUBLE, &status);
   MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
-  printf("Wrote %d of %d elements\n", count_succeed, count);
+  printf("%d: wrote %d of %d elements\n", rank, count_succeed, count);
 
   /* read 1-D array*/
   memset(array, 0, sizeof(double) * count);
-  MPI_File_read_at(fh, 0, array, count, MPI_DOUBLE, &status);
+  MPI_File_read_at_all(fh, count*rank, array, count, MPI_DOUBLE, &status);
   MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
-  printf("Read %d of %d elements\n", count_succeed, count);
+  printf("%d: read  %d of %d elements\n", rank, count_succeed, count);
   
   checkArray(array, count);
 
   /* write 2-D array */
-  sizes[0] = sqrt(count);
-  sizes[1] = count / sizes[0];
-  MPI_Type_create_subarray(2, sizes, sizes, starts,
-                           MPI_ORDER_C, MPI_DOUBLE, &array_type);
-  MPI_Type_commit(&array_type);
+  height = sizes[0] = sqrt(count);
+  width = sizes[1] = count / height;
+  file_sizes[0] = height;
+  file_sizes[1] = width * np;
+  starts[0] = 0;
+  starts[1] = width * rank;
+  MPI_Type_create_subarray(2, file_sizes, sizes, starts,
+                           MPI_ORDER_C, MPI_DOUBLE, &file_type);
+  MPI_Type_commit(&file_type);
 
-  MPI_File_write_at(fh, 0, array, 1, array_type, &status);
-  MPI_Get_count(&status, array_type, &count_succeed);
-  printf("Wrote %d of 1 %dx%d array\n", count_succeed, sizes[0], sizes[1]);
+  MPI_File_set_view(fh, 0, file_type, file_type, "native", MPI_INFO_NULL);
+
+  MPI_File_write_at(fh, 0, array, height*width, MPI_DOUBLE, &status);
+  MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
+  printf("%d: Wrote %d of %d %dx%d array independent\n",
+         rank, count_succeed, height*width, sizes[0], sizes[1]);
+
+  MPI_File_write_at_all(fh, 0, array, height*width, MPI_DOUBLE, &status);
+  MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
+  printf("%d: Wrote %d of %d %dx%d array collective\n",
+         rank, count_succeed, height*width, sizes[0], sizes[1]);
+
 
   /* read 2-D array */
   memset(array, 0, sizeof(double) * count);
-  MPI_File_read_at(fh, 0, array, 1, array_type, &status);
-  MPI_Get_count(&status, array_type, &count_succeed);
-  printf("Read %d of 1 %dx%d array\n", count_succeed, sizes[0], sizes[1]);
+  MPI_File_read_at(fh, 0, array, height*width, MPI_DOUBLE, &status);
+  MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
+  printf("%d: Read  %d of %d %dx%d array independent\n",
+         rank, count_succeed, height*width, sizes[0], sizes[1]);
   checkArray(array, sizes[0] * sizes[1]);
-  
+
+  memset(array, 0, sizeof(double) * count);
+  MPI_File_read_at_all(fh, 0, array, height*width, MPI_DOUBLE, &status);
+  MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
+  printf("%d: Read  %d of %d %dx%d array collective\n",
+         rank, count_succeed, height*width, sizes[0], sizes[1]);
+  checkArray(array, sizes[0] * sizes[1]);
+
   MPI_File_close(&fh);
   
   if (rank == 0) remove(filename);
@@ -105,7 +128,7 @@ int main(int argc, char **argv) {
 int checkArray(const double *array, int count) {
   int i;
   for (i=0; i < count; i++) {
-    if (array[i] != i) {
+    if (array[i] != i + rank*1000000) {
       printf("Read error: array[%d] should be %e, but is %e\n",
              i, (double)i, array[i]);
       return 1;
