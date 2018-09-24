@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     testWriteEndian(fh);
     testWriteOrder(fh);
   }
-  testLargeAccess(fh);
+  /* testLargeAccess(fh); */
   MPI_File_close(&fh);
 
   if (rank == 0) remove(FILENAME);
