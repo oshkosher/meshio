@@ -73,8 +73,10 @@ int main(int argc, char **argv) {
      MPI_File_read_at_all fails with 393216000 doubles (3GB)
   */
   memset(array, 0, sizeof(double) * count);
+  /*
   printf("%d: MPI_File_read_at(fh, count*rank=%d, array, count=%d, ...)\n", 
          rank, count*rank, count);
+  */
   MPI_File_read_at(fh, count*rank, array, count, MPI_DOUBLE, &status);
   MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
   printf("%d: read  %d of %d elements independent\n", rank, count_succeed, count);
@@ -114,7 +116,6 @@ int main(int argc, char **argv) {
   /* read 2-D array */
   memset(array, 0, sizeof(double) * count);
   MPI_File_read_at(fh, 0, array, height*width, MPI_DOUBLE, &status);
-  fprintf(stderr, "%d: after MPI_File_read_at\n", rank);
   MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
   printf("%d: Read  %d of %d %dx%d array independent\n",
          rank, count_succeed, height*width, sizes[0], sizes[1]);
@@ -122,7 +123,6 @@ int main(int argc, char **argv) {
 
   memset(array, 0, sizeof(double) * count);
   MPI_File_read_at_all(fh, 0, array, height*width, MPI_DOUBLE, &status);
-  fprintf(stderr, "%d: after MPI_File_read_at_all\n", rank);
   MPI_Get_count(&status, MPI_DOUBLE, &count_succeed);
   printf("%d: Read  %d of %d %dx%d array collective\n",
          rank, count_succeed, height*width, sizes[0], sizes[1]);
