@@ -82,6 +82,7 @@
      memory mesh.
    order - array index order. MPI_ORDER_C for row-major,
      MPI_ORDER_FORTRAN for column-major.
+   comm - the MPI communicator use to open the file fh
 
   Returns:
     MPI_SUCCESS on success
@@ -105,7 +106,8 @@ int Mesh_IO_read
  const int *file_mesh_starts,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int order);
+ int order,
+ MPI_Comm comm);
 
 
 
@@ -131,7 +133,8 @@ int Mesh_IO_write
  const int *file_mesh_starts,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int order);
+ int order,
+ MPI_Comm comm);
 
 
 typedef void (*Mesh_IO_traverse_fn)(void *p, size_t count, void *param);

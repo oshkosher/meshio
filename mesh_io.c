@@ -85,15 +85,14 @@ static int isEndianSwapNeeded(int file_endian);
      as it is stored in the file.
    file_mesh_starts - number of elements in each dimension by which the
      submesh being read is inset from the origin of the file mesh.
-   file_array_order - storage order of the mesh on disk.
-     MPI_ORDER_C for row-major, MPI_ORDER_FORTRAN for column-major.
    memory_mesh_sizes - number of elements in each dimension of the full
      in-memory mesh
    memory_mesh_starts - number of elements in each dimension by which the
      submesh being written to memory is inset from the origin of the
      memory mesh.
-   memory_array_order - storage order of the mesh in memory.
+   order - storage order of the mesh in memory.
      MPI_ORDER_C for row-major, MPI_ORDER_FORTRAN for column-major.
+   comm - the MPI communicator use to open the file fh
 
   Returns:
     MPI_SUCCESS on success
@@ -119,14 +118,15 @@ int Mesh_IO_read
  const int *file_mesh_starts,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int order) {
+ int order,
+ MPI_Comm comm) {
 
   int i, err = MPI_SUCCESS, rank;
   MPI_Datatype file_type, memory_type;
   size_t element_size;
   MPI_Status status;
 
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_rank(comm, &rank);
 
   /* check for argument errors and initialize datatypes */
   err = readWriteInit(fh, offset, etype, file_endian, ndims, mesh_sizes,
@@ -175,7 +175,8 @@ int Mesh_IO_write
  const int *file_mesh_starts,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int order) {
+ int order,
+ MPI_Comm comm) {
 
   int i, err = MPI_SUCCESS, rank, doEndianSwap;
   MPI_Datatype file_type, memory_type;
@@ -183,7 +184,7 @@ int Mesh_IO_write
   MPI_Status status;
   void *temp_buffer = NULL;
 
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_rank(comm, &rank);
 
   /* compute the total number of elements */
   element_count = 1;

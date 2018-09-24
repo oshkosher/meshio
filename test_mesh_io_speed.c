@@ -296,7 +296,7 @@ void runTests(Params *p) {
     start_time = MPI_Wtime();
     err = Mesh_IO_write(f, 0, MPITYPE, file_endian, p->buf_write, 2,
                         mesh_size, file_size, file_start,
-                        mesh_size, mem_start, MPI_ORDER_C);
+                        mesh_size, mem_start, MPI_ORDER_C, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
     write_time = MPI_Wtime() - start_time;
     total_write += write_time;
@@ -313,7 +313,7 @@ void runTests(Params *p) {
     start_time = MPI_Wtime();
     err = Mesh_IO_read(f, 0, MPITYPE, file_endian, p->buf_read, 2,
                        mesh_size, file_size, file_start,
-                       mesh_size, mem_start, MPI_ORDER_C);
+                       mesh_size, mem_start, MPI_ORDER_C, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
     read_time = MPI_Wtime() - start_time;
     total_read += read_time;
