@@ -1,7 +1,8 @@
 #ifndef __MPI_MESH_IO_H__
 #define __MPI_MESH_IO_H__
 
-/* Mesh IO - a small wrapper around MPI-IO to efficiently read and write mesh data.
+/* Mesh IO - a small wrapper around MPI-IO to efficiently read and write
+   mesh data.
 
    Ed Karrels, edk@illinois.edu, 2016
 */
@@ -74,15 +75,14 @@
      as it is stored in the file.
    file_mesh_starts - number of elements in each dimension by which the
      submesh being read is inset from the origin of the file mesh.
-   file_array_order - storage order of the mesh on disk.
-     MPI_ORDER_C for row-major, MPI_ORDER_FORTRAN for column-major.
    memory_mesh_sizes - number of elements in each dimension of the full
      in-memory mesh
    memory_mesh_starts - number of elements in each dimension by which the
      submesh being written to memory is inset from the origin of the
      memory mesh.
-   memory_array_order - storage order of the mesh in memory.
-     MPI_ORDER_C for row-major, MPI_ORDER_FORTRAN for column-major.
+   order - array index order. MPI_ORDER_C for row-major,
+     MPI_ORDER_FORTRAN for column-major.
+   comm - the MPI communicator use to open the file fh
 
   Returns:
     MPI_SUCCESS on success
@@ -104,10 +104,11 @@ int Mesh_IO_read
  const int *mesh_sizes,
  const int *file_mesh_sizes,
  const int *file_mesh_starts,
- int file_array_order,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int memory_array_order);
+ int order,
+ MPI_Comm comm);
+
 
 
 /* Write an n-dimensional mesh to a file.
@@ -130,10 +131,10 @@ int Mesh_IO_write
  const int *mesh_sizes,
  const int *file_mesh_sizes,
  const int *file_mesh_starts,
- int file_array_order,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int memory_array_order);
+ int order,
+ MPI_Comm comm);
 
 
 typedef void (*Mesh_IO_traverse_fn)(void *p, size_t count, void *param);
