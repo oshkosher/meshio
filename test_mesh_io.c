@@ -149,7 +149,7 @@ void testReadSimple(MPI_File fh) {
   
   err = Mesh_IO_read(fh, FILE_HEADER_LEN, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                      data, 3, read_size,
-                     simple_file_size, read_starts, MPI_ORDER_C,
+                     simple_file_size, read_starts,
                      read_size, write_starts, MPI_ORDER_C);
 
   if (err != MPI_SUCCESS) {
@@ -188,7 +188,7 @@ void testReadWithHalo(MPI_File fh) {
 
   err = Mesh_IO_read(fh, FILE_HEADER_LEN, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                      data, 3, read_size,
-                     simple_file_size, read_starts, MPI_ORDER_C,
+                     simple_file_size, read_starts,
                      write_buffer_size, write_starts, MPI_ORDER_C);
 
   if (err != MPI_SUCCESS) {
@@ -285,11 +285,11 @@ void testReadOrder(MPI_File fh) {
   
   Mesh_IO_read(fh, FILE_HEADER_LEN, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                array1, 3, mesh_sizes1, file_mesh_sizes, file_mesh_starts1,
-               MPI_ORDER_C, mesh_sizes1, memory_mesh_starts, MPI_ORDER_C);
+               mesh_sizes1, memory_mesh_starts, MPI_ORDER_C);
   
   Mesh_IO_read(fh, FILE_HEADER_LEN, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                array2, 3, mesh_sizes2, file_mesh_sizes, file_mesh_starts2,
-               MPI_ORDER_FORTRAN, mesh_sizes2, memory_mesh_starts,
+               mesh_sizes2, memory_mesh_starts,
                MPI_ORDER_FORTRAN);
   
   for (i=0; i < 30; i++)
@@ -312,7 +312,7 @@ void testWriteSimple(MPI_File fh) {
 
   /* write array1 */
   err = Mesh_IO_write(fh, 0, MPI_INT, MESH_IO_IGNORE_ENDIAN, array1, 1, 
-                      &length, &length, &start, MPI_ORDER_C,
+                      &length, &length, &start,
                       &length, &start, MPI_ORDER_C);
   assert(err == MPI_SUCCESS);
 
@@ -343,7 +343,7 @@ void testWriteOffset(MPI_File fh) {
 
   /* write array1 */
   err = Mesh_IO_write(fh, 3, MPI_INT, MESH_IO_IGNORE_ENDIAN, array1, 1, 
-                      &length, &length, &start, MPI_ORDER_C,
+                      &length, &length, &start,
                       &length, &start, MPI_ORDER_C);
   assert(err == MPI_SUCCESS);
 
@@ -400,7 +400,7 @@ void testWritePartial(MPI_File fh) {
   err = Mesh_IO_write
     (fh, FILE_HEADER_LEN, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
      sub_mesh, 3,
-     mesh_sizes, file_mesh_sizes, file_mesh_starts, MPI_ORDER_C,
+     mesh_sizes, file_mesh_sizes, file_mesh_starts,
      memory_mesh_sizes, memory_mesh_starts, MPI_ORDER_C);
   if (err != MPI_SUCCESS) {
     reportError("Failed with error code", err);
@@ -470,7 +470,7 @@ void testWriteEndian(MPI_File fh) {
   err = Mesh_IO_write
     (fh, FILE_HEADER_LEN, MPI_DOUBLE, MESH_IO_SWAP_ENDIAN,
      mesh, 2,
-     mesh_sizes, file_mesh_sizes, file_mesh_starts, MPI_ORDER_C,
+     mesh_sizes, file_mesh_sizes, file_mesh_starts,
      memory_mesh_sizes, memory_mesh_starts, MPI_ORDER_C);
   if (err != MPI_SUCCESS) {
     reportError("Failed with error code", err);
@@ -512,13 +512,13 @@ void testWriteOrder(MPI_File fh) {
   
   err = Mesh_IO_write(fh, 0, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                       array1, 3, mesh_sizes1, file_mesh_sizes,
-                      file_mesh_starts1, MPI_ORDER_C, mesh_sizes1,
+                      file_mesh_starts1, mesh_sizes1,
                       memory_mesh_starts, MPI_ORDER_C);
   checkError("write", err);
   
   err = Mesh_IO_read(fh, 0, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                      array2, 3, mesh_sizes1, file_mesh_sizes,
-                     file_mesh_starts1, MPI_ORDER_C, mesh_sizes1,
+                     file_mesh_starts1, mesh_sizes1,
                      memory_mesh_starts, MPI_ORDER_C);
   checkError("read", err);
 
@@ -526,13 +526,13 @@ void testWriteOrder(MPI_File fh) {
   
   Mesh_IO_write(fh, 0, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                array1, 3, mesh_sizes2, file_mesh_sizes, file_mesh_starts2,
-               MPI_ORDER_FORTRAN, mesh_sizes2, memory_mesh_starts,
+               mesh_sizes2, memory_mesh_starts,
                 MPI_ORDER_FORTRAN);
   checkError("write", err);
   
   Mesh_IO_read(fh, 0, MPI_DOUBLE, MESH_IO_IGNORE_ENDIAN,
                array2, 3, mesh_sizes1, file_mesh_sizes, file_mesh_starts1,
-               MPI_ORDER_C, mesh_sizes1, memory_mesh_starts, MPI_ORDER_C);
+               mesh_sizes1, memory_mesh_starts, MPI_ORDER_C);
   checkError("read", err);
   
   for (i=0; i < 30; i++) assert(array1[i] == array2[i]);
@@ -588,7 +588,7 @@ void testLargeAccess(MPI_File fh) {
   
   result = Mesh_IO_write(fh, 0, MPI_INT, MESH_IO_IGNORE_ENDIAN, buf,
                          2, mesh_sizes,
-                         file_mesh_sizes, file_mesh_starts, MPI_ORDER_C, 
+                         file_mesh_sizes, file_mesh_starts,
                          memory_mesh_sizes, memory_mesh_starts, MPI_ORDER_C);
   
   if (result != MPI_SUCCESS) {

@@ -52,10 +52,9 @@ static int readWriteInit
  const int *mesh_sizes,
  const int *file_mesh_sizes,
  const int *file_mesh_starts,
- int file_array_order,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int memory_array_order,
+ int array_order,
  MPI_Datatype *file_type,
  MPI_Datatype *memory_type,
  size_t *element_size);
@@ -118,10 +117,9 @@ int Mesh_IO_read
  const int *mesh_sizes,
  const int *file_mesh_sizes,
  const int *file_mesh_starts,
- int file_array_order,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int memory_array_order) {
+ int order) {
 
   int i, err = MPI_SUCCESS, rank;
   MPI_Datatype file_type, memory_type;
@@ -132,8 +130,8 @@ int Mesh_IO_read
 
   /* check for argument errors and initialize datatypes */
   err = readWriteInit(fh, offset, etype, file_endian, ndims, mesh_sizes,
-                      file_mesh_sizes, file_mesh_starts, file_array_order,
-                      memory_mesh_sizes, memory_mesh_starts, memory_array_order,
+                      file_mesh_sizes, file_mesh_starts, 
+                      memory_mesh_sizes, memory_mesh_starts, order,
                       &file_type, &memory_type, &element_size);
   if (err != MPI_SUCCESS) return err;
 
@@ -153,7 +151,7 @@ int Mesh_IO_read
     Mesh_IO_endian_swap_in_place
       (buf, element_size, ndims,
        memory_mesh_sizes, mesh_sizes,
-       memory_mesh_starts, memory_array_order);
+       memory_mesh_starts, order);
   }
   
   /* free my datatypes */
@@ -175,10 +173,9 @@ int Mesh_IO_write
  const int *mesh_sizes,
  const int *file_mesh_sizes,
  const int *file_mesh_starts,
- int file_array_order,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int memory_array_order) {
+ int order) {
 
   int i, err = MPI_SUCCESS, rank, doEndianSwap;
   MPI_Datatype file_type, memory_type;
@@ -197,8 +194,8 @@ int Mesh_IO_write
   /* Check for argument errors and initialize datatypes.
      If bytes need to be swapped; don't create the memory datatype. */
   err = readWriteInit(fh, offset, etype, file_endian, ndims, mesh_sizes,
-                      file_mesh_sizes, file_mesh_starts, file_array_order,
-                      memory_mesh_sizes, memory_mesh_starts, memory_array_order,
+                      file_mesh_sizes, file_mesh_starts,
+                      memory_mesh_sizes, memory_mesh_starts, order,
                       &file_type,
                       doEndianSwap ? NULL : &memory_type,
                       &element_size);
@@ -223,7 +220,7 @@ int Mesh_IO_write
     
     Mesh_IO_copy_to_linear_array
       (temp_buffer, buf, element_size, ndims, memory_mesh_sizes,
-       mesh_sizes, memory_mesh_starts, memory_array_order);
+       mesh_sizes, memory_mesh_starts, order);
 
     reverseBytes(temp_buffer, element_size, element_count);
     
@@ -268,10 +265,9 @@ static int readWriteInit
  const int *mesh_sizes,
  const int *file_mesh_sizes,
  const int *file_mesh_starts,
- int file_array_order,
  const int *memory_mesh_sizes,
  const int *memory_mesh_starts,
- int memory_array_order,
+ int order,
  MPI_Datatype *file_type,
  MPI_Datatype *memory_type,
  size_t *element_size) {
@@ -296,19 +292,14 @@ static int readWriteInit
     assert(!(file_mesh_starts[i] + mesh_sizes[i] > file_mesh_sizes[i]));
     assert(!(memory_mesh_starts[i] < 0));
     assert(!(memory_mesh_starts[i] + mesh_sizes[i] > memory_mesh_sizes[i]));
-    assert(!(!(file_array_order == MPI_ORDER_FORTRAN ||
-             file_array_order == MPI_ORDER_C)));
-    assert(!(!(memory_array_order == MPI_ORDER_FORTRAN ||
-             memory_array_order == MPI_ORDER_C)));
+    assert(!(!(order == MPI_ORDER_FORTRAN ||
+             order == MPI_ORDER_C)));
     */
     if (file_mesh_starts[i] < 0
         || file_mesh_starts[i] + mesh_sizes[i] > file_mesh_sizes[i]
         || memory_mesh_starts[i] < 0
         || memory_mesh_starts[i] + mesh_sizes[i] > memory_mesh_sizes[i]
-        || !(file_array_order == MPI_ORDER_FORTRAN ||
-             file_array_order == MPI_ORDER_C)
-        || !(memory_array_order == MPI_ORDER_FORTRAN ||
-             memory_array_order == MPI_ORDER_C)
+        || !(order == MPI_ORDER_FORTRAN || order == MPI_ORDER_C)
         ) {
       return MPI_ERR_ARG;
     }
@@ -333,7 +324,7 @@ static int readWriteInit
          mesh_sizes[0], mesh_sizes[1], mesh_sizes[2],
          file_mesh_starts[0], file_mesh_starts[1], file_mesh_starts[2]); */
   err = MPI_Type_create_subarray
-    (ndims, file_mesh_sizes, mesh_sizes, file_mesh_starts, file_array_order,
+    (ndims, file_mesh_sizes, mesh_sizes, file_mesh_starts, order,
      etype, file_type);
   if (err != MPI_SUCCESS) goto fail0;
 
@@ -353,7 +344,7 @@ static int readWriteInit
   if (memory_type != NULL) {
     err = MPI_Type_create_subarray
       (ndims, memory_mesh_sizes, mesh_sizes, memory_mesh_starts,
-       memory_array_order, etype, memory_type);
+       order, etype, memory_type);
     if (err != MPI_SUCCESS) goto fail1;
     
     err = MPI_Type_commit(memory_type);
