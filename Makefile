@@ -2,15 +2,17 @@ default: all
 
 EXECS=test_mesh_io test_mesh_io_speed test_subarrays test_2gb_io
 # CFLAGS=-O3 -Wall
-CFLAGS=-g -Wall -std=c90
+CFLAGS=-g -Wall
 LIBS=
-MPICC=mpicc
+MPICC=mpicc -std=c90
+MPICXX=mpic++
 CC=gcc
 
 # Blue Waters
 ifeq "$(shell hostname | head -c 8)" "h2ologin"
 CFLAGS=-O3
 MPICC=cc
+MPICXX=CC
 CC=cc
 LIBS=-lrt
 
@@ -19,7 +21,7 @@ else
 # Simple Linux node
 MISSING_MPICC := $(shell which mpicc &>/dev/null; echo $$?)
 ifeq "$(MISSING_MPICC)" "1"
-MPICC=gcc
+MPICC=gcc -std=c90
 endif
 
 # LIBS=-lmpi -lm
@@ -40,8 +42,8 @@ mesh_io.o: mesh_io.c mesh_io.h
 test_mesh_io: test_mesh_io.c mesh_io.o reverse_bytes.o
 	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
 
-test_mesh_io_speed: test_mesh_io_speed.c mesh_io.o reverse_bytes.o
-	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
+test_mesh_io_speed: test_mesh_io_speed.cc mesh_io.o reverse_bytes.o
+	$(MPICXX) $(CFLAGS) $^ $(LIBS) -o $@
 
 test_subarrays: test_subarrays.c
 	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@

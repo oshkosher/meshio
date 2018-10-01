@@ -19,7 +19,9 @@
 #define MESH_IO_SWAP_ENDIAN 3    /* Data file is opposite endian; 
                                     do swap bytes. */
 
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Read an n-dimensional mesh from a file.
    This is a collective call. All the ranks that opened the file 'fh'
@@ -164,6 +166,8 @@ size_t Mesh_IO_copy_to_linear_array
  const int *full_mesh_sizes, const int *sub_mesh_sizes,
  const int *sub_mesh_starts, int array_order);
 
-
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __MPI_MESH_IO_H__ */

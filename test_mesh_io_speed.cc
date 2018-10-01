@@ -384,7 +384,6 @@ int compareDoubles(const void *av, const void *bv) {
 /* Compute simple statistice on an array of doubles.
    Trim 20% of the data off either end. */
 void computeStats(Stats *s, double *data, size_t count) {
-  int i;
   double sum = 0, sum2 = 0;
 
   if (count == 0) {
@@ -402,7 +401,7 @@ void computeStats(Stats *s, double *data, size_t count) {
 
   s->min = s->max = data[0];
   
-  for (i=0; i < count; i++) {
+  for (size_t i=0; i < count; i++) {
     /* printf("%.8f\n", data[i]); */
     sum += data[i];
     sum2 += data[i] * data[i];
