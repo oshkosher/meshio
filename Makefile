@@ -1,8 +1,9 @@
 default: all
 
 EXECS=test_mesh_io test_mesh_io_speed test_subarrays test_2gb_io
-# CFLAGS=-O3 -Wall
-CFLAGS=-g -Wall
+CFLAGS=-O3
+# CFLAGS=-g
+CFLAGS+=-Wall -Wno-sign-compare
 LIBS=
 MPICC=mpicc -std=c90
 MPICXX=mpic++

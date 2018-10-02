@@ -54,6 +54,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
+#include <vector>
+#include <sstream>
+#include <string>
+#include <algorithm>
 #include <mpi.h>
 #include "mesh_io.h"
 
@@ -65,19 +70,25 @@ typedef double TYPE;
 int file_endian = MESH_IO_IGNORE_ENDIAN;
 /* int file_endian = MESH_IO_SWAP_ENDIAN; */
 
+using std::vector;
+using std::string;
+using std::ostringstream;
+using std::min;
+using std::sort;
+
+
 int rank, np;
 
 typedef struct {
-  int data_height, data_width;
-  int ranks_height, ranks_width;
+  vector<int> data_size, rank_size;
+  int dims;
   int iters;
   const char *filename;
   int stripe_len, stripe_count;
 
   TYPE *buf_write, *buf_read;
   int x, y;            /* index of my chunk */
-  int ystart, xstart;  /* position of my chunk */
-  int ysize, xsize;    /* size of my chunk */
+  vector<int> dim_rank, my_offset, my_size;
 } Params;
 
 typedef struct {
@@ -85,8 +96,13 @@ typedef struct {
 } Stats;
 
 int init(Params *opt, int argc, char **argv);
+bool readVector(vector<int> &v, const char *s);
+bool isVectorPositive(const vector<int> &v);
+long vectorProd(const vector<int> &v, int offset=0, int len=INT_MAX);
+string vectorToStr(const vector<int> &v);
+int anyFailed(int fail);
 void runTests(Params *opt);
-void computeStats(Stats *s, double *data, size_t count);
+void computeStats(Stats *s, const vector<double> &data);
 
 
 int main(int argc, char **argv) {
@@ -96,7 +112,7 @@ int main(int argc, char **argv) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &np);
 
-  if (!init(&opt, argc, argv)) goto fail;
+  if (init(&opt, argc, argv)) goto fail;
   
   runTests(&opt);
 
@@ -124,7 +140,7 @@ void printHelp() {
 int init(Params *p, int argc, char **argv) {
   long i, count, argno;
   double start_time = MPI_Wtime();
-  int success = 1;
+  int fail = 0;
 
   if (argc < 4) printHelp();
 
@@ -159,37 +175,55 @@ int init(Params *p, int argc, char **argv) {
   }
 
   if (argc - argno < 3 || argc - argno > 4) printHelp();
-    
-  if (2 != sscanf(argv[argno++], "%dx%d", &p->data_height, &p->data_width)
-      || p->data_height <= 0
-      || p->data_width <= 0) {
+
+  // read data dimension string
+  if (!readVector(p->data_size, argv[argno])
+      || p->data_size.size() == 0){
     if (rank == 0)
-      printf("Invalid data size (must be in the form 000x000, and both must "
-             "be positive: \"%s\"\n", argv[argno-1]);
-    return 0;
+      printf("Invalid data size: \"%s\"\n", argv[argno]);
+    return 1;
   }
-    
-  if (2 != sscanf(argv[argno++], "%dx%d", &p->ranks_height, &p->ranks_width)
-      || p->ranks_height <= 0
-      || p->ranks_width <= 0) {
+  if (!isVectorPositive(p->data_size)) {
+    if (rank==0)
+      printf("Data size must be positive in all dimensions.\n");
+    return 1;
+  }
+  p->dims = p->data_size.size();
+  
+  argno++;
+
+  // read rank dimension string
+  if (!readVector(p->rank_size, argv[argno])
+      || p->rank_size.size() == 0) {
     if (rank == 0)
-      printf("Invalid rank split (must be in the form 000x000, and both must "
-             "be positive: \"%s\"\n", argv[argno-1]);
-    return 0;
+      printf("Invalid rank layout: \"%s\"\n", argv[argno]);
+    return 1;
+  }
+  if (!isVectorPositive(p->rank_size)) {
+    if (rank==0)
+      printf("Rank layout must be positive in all dimensions.\n");
+    return 1;
+  }
+  if (p->rank_size.size() != p->dims) {
+    if (rank==0)
+      printf("Data described in %d dimensions, ranks in %d. Must match.\n",
+             p->dims, (int)p->rank_size.size());
+    return 1;
+  }
+  if (np != vectorProd(p->rank_size)) {
+    if (rank==0)
+      printf("Rank layout describes %d processes, but job has %d.\n",
+             (int)vectorProd(p->rank_size), np);
+    return 1;
   }
 
+  argno++;
+  
   if (1 != sscanf(argv[argno++], "%d", &p->iters)
       || p->iters <= 0) {
     if (rank == 0)
       printf("Invalid # of iterations: \"%s\"\n", argv[argno-1]);
-    return 0;
-  }
-
-  if (p->ranks_height * p->ranks_width != np) {
-    if (rank == 0)
-      printf("Rank split %dx%d does not match rank count %d\n",
-             p->ranks_height, p->ranks_width, np);
-    return 0;
+    return 1;
   }
 
   p->filename = DEFAULT_FILENAME;
@@ -197,26 +231,47 @@ int init(Params *p, int argc, char **argv) {
     p->filename = argv[argno++];
   }
 
-  if (rank==0)
-    printf("test_mesh_io_speed data %dx%d, ranks %dx%d iters %d, file %s\n",
-           p->data_height, p->data_width, p->ranks_height, p->ranks_width,
-           p->iters, p->filename);
+  if (rank==0) {
+    string data_str = vectorToStr(p->data_size),
+      rank_str = vectorToStr(p->rank_size);
+    printf("test_mesh_io_speed data %s, ranks %s, iters %d, file %s\n",
+           data_str.c_str(), rank_str.c_str(), p->iters, p->filename);
+  }
 
   /* determine the position and size of my chunk */
-  p->y = rank / p->ranks_width;
-  p->x = rank % p->ranks_width;
+  p->my_offset.resize(p->dims);
+  p->my_size.resize(p->dims);
+  p->dim_rank.resize(p->dims);
+  for (size_t dim=0; dim < p->dims; dim++) {
+    int subdim_size = vectorProd(p->rank_size, dim+1);
+    p->dim_rank[dim] = (rank / subdim_size) % p->rank_size[dim];
+    
+    p->my_offset[dim] = (long)p->dim_rank[dim] * p->data_size[dim]
+      / p->rank_size[dim];
+    int next = (long)(p->dim_rank[dim] + 1) * p->data_size[dim]
+      / p->rank_size[dim];
+    p->my_size[dim] = next - p->my_offset[dim];
+  }
+
+  // all processes print their coords
+  for (int i=0; i < np; i++) {
+    if (rank == i) {
+      string coord = vectorToStr(p->dim_rank),
+        offset = vectorToStr(p->my_offset),
+        size = vectorToStr(p->my_size);
+      printf("[%d] coord %s, start %s, size %s\n", rank, coord.c_str(),
+             offset.c_str(), size.c_str());
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
   
-  p->ysize = (p->data_height + p->ranks_height - 1) / p->ranks_height;
-  p->xsize = (p->data_width + p->ranks_width - 1) / p->ranks_width;
-
-  p->ystart = p->y * p->ysize;
-  p->xstart = p->x * p->xsize;
-
   /* trim the last row and column if necessary */
+  /*
   if (p->ystart + p->ysize > p->data_height)
     p->ysize = p->data_height - p->ystart;
   if (p->xstart + p->xsize > p->data_width)
     p->xsize = p->data_width - p->xstart;
+  */
 
   /*
   printf("%d: %lu bytes (%d,%d) at (%d,%d) size (%d,%d)\n",
@@ -226,20 +281,19 @@ int init(Params *p, int argc, char **argv) {
   */
 
   /* allocate the buffer */
-  count = (long)p->ysize * p->xsize;
-  p->buf_write = (TYPE*) malloc(sizeof(TYPE) * count);
-  p->buf_read  = (TYPE*) malloc(sizeof(TYPE) * count);
+  count = (long)vectorProd(p->my_size);
+  p->buf_write = new TYPE[count];
+  p->buf_read  = new TYPE[count];
   if (!p->buf_write || !p->buf_read) {
-    printf("%d: failed to allocate 2 * %lu bytes\n", rank,
-           (long unsigned)(sizeof(TYPE) * p->ysize * p->xsize));
-    success = 0;
+    printf("%d: failed to allocate %ld bytes\n", rank,
+           (long)(sizeof(TYPE) * count));
+    fail = 1;
   }
 
   /* make sure everyone succeeded */
-  MPI_Allreduce(MPI_IN_PLACE, &success, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-  if (!success) {
+  if (anyFailed(fail)) {
     if (rank == 0) printf("Some ranks failed to allocate memory; exiting.\n");
-    return 0;
+    return 1;
   }
 
   /* fill the write buffer with random data */
@@ -250,31 +304,94 @@ int init(Params *p, int argc, char **argv) {
   /* fill the read buffer with zeros */
   memset(p->buf_read, 0, sizeof(TYPE) * count);
 
+  MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0)
     printf("Init finished in %.3f sec\n", MPI_Wtime() - start_time);
   
-  return 1;
+  return 0;
 }
+
+
+/* Read a vector description in the form 100[x200[x300[...]]] */
+bool readVector(vector<int> &v, const char *s) {
+  int pos = 0, consumed, value;
+  char separator;
+  v.clear();
+
+  while (s[pos]) {
+    if (1 != sscanf(s+pos, "%d%n", &value, &consumed))
+      return false;
+
+    if (value <= 0)
+      return false;
+    
+    v.push_back(value);
+    pos += consumed;
+
+    // no more 'x'
+    if (1 != sscanf(s+pos, " %c%n", &separator, &consumed))
+      break;
+
+    if (separator != 'x')
+      return false;
+
+    pos += consumed;
+  }
+
+  return true;
+}
+
+
+bool isVectorPositive(const vector<int> &v) {
+  for (size_t i=0; i < v.size(); i++)
+    if (v[i] <= 0) return false;
+  return true;
+}
+
+
+string vectorToStr(const vector<int> &v) {
+  ostringstream s;
+  for (size_t i=0; i < v.size(); i++) {
+    if (i > 0)
+      s << 'x';
+    s << v[i];
+  }
+  return s.str();
+}
+
+
+int anyFailed(int fail) {
+  int any_fail;
+
+  MPI_Allreduce(&fail, &any_fail, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+  return any_fail;
+}
+
+
+long vectorProd(const vector<int> &v, int offset, int len) {
+  len = min(len, (int)v.size()-offset);
+  long s = 1;
+  for (int i=offset; i < offset+len; i++)
+    s *= v[i];
+  return s;
+}
+
 
 
 void runTests(Params *p) {
   MPI_File f;
   int err, i;
-  size_t buf_size = sizeof(TYPE) * p->ysize * p->xsize;
-  size_t total_size = sizeof(TYPE) * p->data_height * p->data_width;
-  int file_size[2] = {p->data_height, p->data_width};
-  int mesh_size[2] = {p->ysize, p->xsize};
-  int file_start[2] = {p->ystart, p->xstart};
-  int mem_start[2] = {0, 0};
-  double *write_times, *read_times;
+  size_t buf_size = sizeof(TYPE) * vectorProd(p->my_size);
+  size_t total_size = sizeof(TYPE) * vectorProd(p->data_size);
+  vector<int> mem_start(p->my_size.size(), 0);
+  vector<double> write_times(p->iters), read_times(p->iters);
   double total_write = 0, total_read = 0, write_time, read_time, start_time;
   double write_gbps, read_gbps, open_time;
   MPI_Info info;
   char int_str[50];
-  
-  write_times = (double*) malloc(sizeof(double) * p->iters);
-  read_times  = (double*) malloc(sizeof(double) * p->iters);
 
+  MPI_Barrier(MPI_COMM_WORLD);
+  
   MPI_Info_create(&info);
   sprintf(int_str, "%d", p->stripe_count);
   MPI_Info_set(info, "striping_factor", int_str);
@@ -285,7 +402,9 @@ void runTests(Params *p) {
   MPI_File_open(MPI_COMM_WORLD, p->filename, MPI_MODE_RDWR | MPI_MODE_CREATE,
                 info, &f);
   open_time = MPI_Wtime() - start_time;
-  printf("%d: MPI_File_open %.3f sec\n", rank, open_time);
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank==0)
+    printf("MPI_File_open %.3f sec\n", open_time);
 
   MPI_Info_free(&info);
 
@@ -294,9 +413,10 @@ void runTests(Params *p) {
     /* Write */
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
-    err = Mesh_IO_write(f, 0, MPITYPE, file_endian, p->buf_write, 2,
-                        mesh_size, file_size, file_start,
-                        mesh_size, mem_start, MPI_ORDER_C, MPI_COMM_WORLD);
+    err = Mesh_IO_write(f, 0, MPITYPE, file_endian, p->buf_write, p->dims,
+                        p->my_size.data(), p->data_size.data(),
+                        p->my_offset.data(), p->my_size.data(),
+                        mem_start.data(), MPI_ORDER_C, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
     write_time = MPI_Wtime() - start_time;
     total_write += write_time;
@@ -311,9 +431,10 @@ void runTests(Params *p) {
     /* Read */
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
-    err = Mesh_IO_read(f, 0, MPITYPE, file_endian, p->buf_read, 2,
-                       mesh_size, file_size, file_start,
-                       mesh_size, mem_start, MPI_ORDER_C, MPI_COMM_WORLD);
+    err = Mesh_IO_read(f, 0, MPITYPE, file_endian, p->buf_read, p->dims,
+                        p->my_size.data(), p->data_size.data(),
+                        p->my_offset.data(), p->my_size.data(),
+                        mem_start.data(), MPI_ORDER_C, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
     read_time = MPI_Wtime() - start_time;
     total_read += read_time;
@@ -335,11 +456,12 @@ void runTests(Params *p) {
 
   if (rank == 0) {
     Stats s;
-    printf("%d ranks, %.6f GiB data in %s (%d, %d, %ld), %d x %d MiB stripes\n",
+    string size_str = vectorToStr(p->data_size);
+    printf("%d ranks, %.6f GiB data in %s (%s), %d x %d MiB stripes\n",
            np, (double)total_size / GB,
-           p->filename, p->data_height, p->data_width, (long)total_size,
+           p->filename, size_str.c_str(),
            p->stripe_count, p->stripe_len);
-    computeStats(&s, write_times, p->iters);
+    computeStats(&s, write_times);
     printf("write speed GiB/s %.6f .. %.6f, avg %.3f, median %.3f, "
            "stddev %.1f%%\n",
            total_size / (GB * s.max),
@@ -347,7 +469,7 @@ void runTests(Params *p) {
            total_size / (GB * s.avg),
            total_size / (GB * s.median), s.std_dev / s.avg * 100);
 
-    computeStats(&s, read_times, p->iters);
+    computeStats(&s, read_times);
     printf("read speed GiB/s %.6f .. %.6f, avg %.3f, median %.3f, "
            "stddev %.1f%%\n",
            total_size / (GB * s.max),
@@ -365,8 +487,6 @@ void runTests(Params *p) {
 
   MPI_File_close(&f);
   remove(p->filename);
-  free(write_times);
-  free(read_times);
 }
 
 
@@ -383,20 +503,23 @@ int compareDoubles(const void *av, const void *bv) {
 
 /* Compute simple statistice on an array of doubles.
    Trim 20% of the data off either end. */
-void computeStats(Stats *s, double *data, size_t count) {
+void computeStats(Stats *s, const vector<double> &data_orig) {
   double sum = 0, sum2 = 0;
+  vector<double> data(data_orig);
+  int count = data.size();
 
   if (count == 0) {
     s->min = s->max = s->avg = s->std_dev = s->median = 0;
     return;
   }
 
-  qsort(data, count, sizeof(double), compareDoubles);
+  sort(data.begin(), data.end());
 
   if (count >= 5) {
     int trim = count / 5;
-    data += trim;
-    count -= 2*trim;
+    data.erase(data.begin(), data.begin()+trim);
+    data.erase(data.end()-trim, data.end());
+    count = data.size();
   }
 
   s->min = s->max = data[0];
