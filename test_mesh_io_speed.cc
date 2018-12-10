@@ -67,6 +67,8 @@
 typedef double TYPE;
 #define MPITYPE MPI_DOUBLE
 
+#define PRINT_COORDS 0
+
 int file_endian = MESH_IO_IGNORE_ENDIAN;
 /* int file_endian = MESH_IO_SWAP_ENDIAN; */
 
@@ -254,6 +256,7 @@ int init(Params *p, int argc, char **argv) {
   }
 
   // all processes print their coords
+#if PRINT_COORDS
   for (int i=0; i < np; i++) {
     if (rank == i) {
       string coord = vectorToStr(p->dim_rank),
@@ -264,6 +267,7 @@ int init(Params *p, int argc, char **argv) {
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
+#endif
   
   /* trim the last row and column if necessary */
   /*
