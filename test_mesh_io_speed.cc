@@ -55,6 +55,7 @@
 #include <string.h>
 #include <math.h>
 #include <limits.h>
+#include <assert.h>
 #include <vector>
 #include <sstream>
 #include <string>
@@ -105,6 +106,7 @@ string vectorToStr(const vector<int> &v);
 int anyFailed(int fail);
 void runTests(Params *opt);
 void computeStats(Stats *s, const vector<double> &data);
+void printFileInfo(MPI_File f);
 
 
 int main(int argc, char **argv) {
@@ -412,6 +414,11 @@ void runTests(Params *p) {
 
   MPI_Info_free(&info);
 
+  // Check the file open info; see all options
+  if (rank == 0) {
+    // printFileInfo(f);
+  }
+
   for (i = 0; i < p->iters; i++) {
 
     /* Write */
@@ -544,5 +551,43 @@ void computeStats(Stats *s, const vector<double> &data_orig) {
   } else {
     s->median = 0.5 * (data[(count-1)/2] + data[(count+1)/2]);
   }
+}
+
+
+void printFileInfo(MPI_File f) {
+  MPI_Info info;
+  char key[MPI_MAX_INFO_KEY + 1], *value;
+  int value_buf_len = 256;
+
+  value = (char*) malloc(value_buf_len);
+  assert(value);
+
+  MPI_File_get_info(f, &info);
+
+  int nkeys;
+  MPI_Info_get_nkeys(info, &nkeys);
+  for (int keyno=0; keyno < nkeys; keyno++) {
+    MPI_Info_get_nthkey(info, keyno, key);
+    int value_len, key_defined;
+    MPI_Info_get_valuelen(info, key, &value_len, &key_defined);
+    assert(key_defined);
+
+    // make sure the buffer is large enough for the value
+    if (value_len+1 > value_buf_len) {
+      value_buf_len *= 2;
+      if (value_len+1 > value_buf_len)
+        value_buf_len = value_len+1;
+      value = (char*) realloc(value, value_buf_len);
+      assert(value);
+    }
+
+    MPI_Info_get(info, key, value_buf_len-1, value, &key_defined);
+    assert(key_defined);
+
+    printf("[%d] MPI_Info \"%s\": \"%s\"\n", rank, key, value);
+  }
+  
+  MPI_Info_free(&info);
+  free(value);
 }
 
