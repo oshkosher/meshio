@@ -56,6 +56,7 @@
 #include <math.h>
 #include <limits.h>
 #include <assert.h>
+#include <inttypes.h>
 #include <vector>
 #include <sstream>
 #include <string>
