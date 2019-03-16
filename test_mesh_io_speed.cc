@@ -428,10 +428,13 @@ int autoSize(Params *p) {
       printf("write %s: %.3fs\n", s.c_str(), timer);
     }
 
-    if (timer > p->min_test_time) {
+    // Don't let the data grow to more than 2 GB per process because
+    // mesh_io still doesn't handle that.
+    if (timer > p->min_test_time || nbytes >= GB * np) {
       break;
     } else {
       doubleSize(p->data_size);
+      nbytes *= 2;
       if (allocateBuffers(p)) return 1;
     }
   }
