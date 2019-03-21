@@ -64,6 +64,7 @@
 #include <mpi.h>
 #include "mesh_io.h"
 
+#define MB ((long)1024*1024)
 #define GB ((long)1024*1024*1024)
 #define DEFAULT_FILENAME "test_mesh_io_speed.tmp"
 typedef double TYPE;
@@ -110,6 +111,7 @@ typedef struct {
 
 int getNodeCount();
 int init(Params *opt, int argc, char **argv);
+int parseSize(const char *str, uint64_t *result);
 int autoSize(Params *p);
 void doubleSize(vector<int> &data_size);
 int allocateBuffers(Params *p);
@@ -122,6 +124,7 @@ int openFile(Params *opt);
 void runTests(Params *opt);
 void computeSpeeds(Stats *s, const vector<double> &times, double data_size_gb);
 void printFileInfo(MPI_File f);
+const char *formatLen(char buf[10], int len);
 
 
 int main(int argc, char **argv) {
@@ -162,7 +165,7 @@ void printHelp() {
            "    <dims> : number of dimensions when data size is automatic\n"
            "    <iters> : number of write/read cycles\n"
            "    opt:\n"
-           "      -stripe_len <n> : set stripe length to <n> MiB\n"
+           "      -stripe_len <n>[m] : set stripe length to <n> bytes or <n>m MiB\n"
            "      -stripe_count <n> : set stripe count\n"
            "      -min_time <sec> : minimum IO time when auto-sizing. default=%.1f\n"
            "  If <data> is 'auto', the size of the data is chosen automatically.\n"
@@ -196,7 +199,7 @@ int init(Params *p, int argc, char **argv) {
   if (argc < 4) printHelp();
 
   p->auto_size = 0;
-  p->stripe_len = 4;
+  p->stripe_len = 4 * MB;
   p->stripe_count = 1;
   p->buf_write = p->buf_read = NULL;
   p->min_test_time = DEFAULT_MIN_TEST_TIME;
@@ -206,11 +209,19 @@ int init(Params *p, int argc, char **argv) {
     if (!strcmp(argv[argno], "-stripe_len")) {
       argno++;
       if (argno >= argc) printHelp();
-      if (1 != sscanf(argv[argno], "%d", &p->stripe_len)
-          || p->stripe_len < 1) {
+      uint64_t tmp_size;
+      if (parseSize(argv[argno], &tmp_size)) {
         if (rank==0) printf("Invalid stripe length: %s\n", argv[argno]);
         return 1;
       }
+
+      if (tmp_size > GB) {
+        if (rank==0)
+          printf("Stripe length too large: %" PRIu64 "\n", tmp_size);
+        return 1;
+      }
+      
+      p->stripe_len = tmp_size;
     }
 
     else if (!strcmp(argv[argno], "-stripe_count")) {
@@ -328,12 +339,67 @@ int init(Params *p, int argc, char **argv) {
       printf("data=%s ranks=%s\n",
              data_str.c_str(), rank_str.c_str());
     }
-    printf("iters=%d, file=%s, %d x %d MiB stripes\n",
-           p->iters, p->filename, p->stripe_count, p->stripe_len);
+    char len_str[10];
+    printf("iters=%d, file=%s, %d x %s stripes\n",
+           p->iters, p->filename, p->stripe_count,
+           formatLen(len_str, p->stripe_len));
   }
   
   openFile(p);
 
+  return 0;
+}
+
+
+/* Parse an unsigned number with a case-insensitive magnitude suffix:
+     k : multiply by 2^10
+     m : multiply by 2^20
+     g : multiply by 2^30
+     t : multiply by 2^40
+     p : multiply by 2^50
+     e : multiply by 2^60
+
+   For example, "32m" would parse as 33554432.
+   Floating point numbers are allowed in the input, but the result is always
+   a 64-bit integer:  ".5g" yields uint64_t(.5 * 2^30)
+   Return nonzero on error.
+*/
+int parseSize(const char *str, uint64_t *result) {
+  uint64_t multiplier = 1;
+  const char *last;
+  char suffix;
+  int consumed;
+  double mantissa;
+  
+  /* missing argument check */
+  if (!str || !str[0] || (!isdigit(str[0]) && str[0] != '.')) return 1;
+
+  if (1 != sscanf(str, "%lf%n", &mantissa, &consumed))
+    return 1;
+  last = str + consumed;
+
+  /* these casts are to avoid issues with signed chars */
+  suffix = (char)tolower((int)*last);
+  switch(suffix) {
+  case 0:
+    multiplier = 1; break;
+  case 'k':
+    multiplier = (uint64_t)1 << 10; break;
+  case 'm':
+    multiplier = (uint64_t)1 << 20; break;
+  case 'g':
+    multiplier = (uint64_t)1 << 30; break;
+  case 't':
+    multiplier = (uint64_t)1 << 40; break;
+  case 'p':
+    multiplier = (uint64_t)1 << 50; break;
+  case 'e':
+    multiplier = (uint64_t)1 << 60; break;
+  default:
+    return 1;  /* unrecognized suffix */
+  }
+
+  *result = (uint64_t)(multiplier * mantissa);
   return 0;
 }
 
@@ -345,7 +411,7 @@ int openFile(Params *p) {
   MPI_Info_create(&info);
   sprintf(int_str, "%d", p->stripe_count);
   MPI_Info_set(info, "striping_factor", int_str);
-  sprintf(int_str, "%ld", (long)p->stripe_len * 1024 * 1024);
+  sprintf(int_str, "%d", p->stripe_len);
   MPI_Info_set(info, "striping_unit", int_str);
   
   MPI_Barrier(MPI_COMM_WORLD);
@@ -367,9 +433,10 @@ int openFile(Params *p) {
 int autoSize(Params *p) {
 
   if (rank == 0 && PRINT_AUTOSIZE) {
+    char len_str[10];
     printf("%.6f auto-sizing data for np=%d, nn=%d, stripe_count=%d, "
-           "stripe_len=%d\n", MPI_Wtime() - t0, np, n_nodes,
-           p->stripe_count, p->stripe_len);
+           "stripe_len=%s\n", MPI_Wtime() - t0, np, n_nodes,
+           p->stripe_count, formatLen(len_str, p->stripe_len));
   }
 
   // let MPI split the dimensions by rank
@@ -810,3 +877,16 @@ void printFileInfo(MPI_File f) {
   free(value);
 }
 
+
+const char *formatLen(char buf[10], int len) {
+  if (len <= 0) {
+    sprintf(buf, "%d", len);
+  } else if ((len % MB) == 0) {
+    sprintf(buf, "%dm", (int)(len / MB));
+  } else if ((len % 1024) == 0) {
+    sprintf(buf, "%dk", len / 1024);
+  } else {
+    sprintf(buf, "%d", len);
+  }
+  return buf;
+}
