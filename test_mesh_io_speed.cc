@@ -57,6 +57,7 @@
 #include <limits.h>
 #include <assert.h>
 #include <inttypes.h>
+#include <stdint.h>
 #include <vector>
 #include <sstream>
 #include <string>
@@ -217,7 +218,8 @@ int init(Params *p, int argc, char **argv) {
 
       if (tmp_size > GB) {
         if (rank==0)
-          printf("Stripe length too large: %" PRIu64 "\n", tmp_size);
+          printf("Stripe length too large: %llu\n",
+                 (long long unsigned)tmp_size);
         return 1;
       }
       
