@@ -320,10 +320,6 @@ static int readWriteInit
     return MPI_ERR_ARG;    
   
   /* define the shape of the mesh on disk (with no offset) */
-  /* printf("[%02d] on disk subarray {%d,%d,%d} {%d,%d,%d} {%d,%d,%d}\n", rank,
-         file_mesh_sizes[0], file_mesh_sizes[1], file_mesh_sizes[2],
-         mesh_sizes[0], mesh_sizes[1], mesh_sizes[2],
-         file_mesh_starts[0], file_mesh_starts[1], file_mesh_starts[2]); */
   err = MPI_Type_create_subarray
     (ndims, file_mesh_sizes, mesh_sizes, file_mesh_starts, order,
      etype, file_type);
@@ -331,6 +327,17 @@ static int readWriteInit
 
   err = MPI_Type_commit(file_type);
   if (err != MPI_SUCCESS) goto fail1;
+
+  /*
+  MPI_Count type_size;
+  MPI_Type_size_x(*file_type, &type_size);
+  printf("on disk subarray {%d,%d,%d} {%d,%d,%d} {%d,%d,%d}, "
+         "size=%llu\n", 
+         file_mesh_sizes[0], file_mesh_sizes[1], file_mesh_sizes[2],
+         mesh_sizes[0], mesh_sizes[1], mesh_sizes[2],
+         file_mesh_starts[0], file_mesh_starts[1], file_mesh_starts[2],
+         (long long unsigned)type_size);
+  */
 
   /* set the file view */
   err = MPI_File_set_view

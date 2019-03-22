@@ -685,8 +685,10 @@ void runTests(Params *p) {
 
   if (rank == 0) {
     string s = vectorToStr(p->data_size);
-    printf("%.6f Test size %s = %ld bytes = %.3f GiB\n",
-           MPI_Wtime() - t0, s.c_str(), (long)total_size, total_size_gb);
+    string s2 = vectorToStr(p->rank_size);
+    printf("%.6f Test size %s = %ld bytes = %.3f GiB, ranks = %s\n",
+           MPI_Wtime() - t0, s.c_str(), (long)total_size, total_size_gb,
+           s2.c_str());
   }
 
   for (i = 0; i < p->iters; i++) {
@@ -829,8 +831,12 @@ void computeSpeeds(Stats *s, const vector<double> &times, double data_size_gb) {
     sum2 += speeds[i] * speeds[i];
   }
 
+  s->avg = s->std_dev = 0;
+  
   s->avg = sum / count;
-  s->std_dev = sqrt( (count * sum2 - sum*sum) / (count * (count-1)) );
+  if (count > 1) {
+    s->std_dev = sqrt( (count * sum2 - sum*sum) / (count * (count-1)) );
+  }
   
   if (count & 1) {
     s->median = speeds[count/2];
