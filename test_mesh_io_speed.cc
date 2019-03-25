@@ -73,6 +73,13 @@ typedef double TYPE;
 #define PRINT_COORDS 0
 #define PRINT_AUTOSIZE 0
 
+#ifdef _CRAYC
+#define PRIu64 "llu"
+#define PRIi64 "lld"
+#define SCNu64 "llu"
+#define SCNi64 "lld"
+#endif
+
 int file_endian = MESH_IO_IGNORE_ENDIAN;
 /* int file_endian = MESH_IO_SWAP_ENDIAN; */
 
@@ -86,10 +93,10 @@ using std::sort;
 int rank, np, n_nodes;
 double t0;  // start time
 
-typedef struct {
+struct Params {
   vector<int> data_size, rank_size;
   int dims;
-  int iters;
+  int iters; // number of times to repeat each test
   int auto_size; // automatically set data_size and rank_size
   const char *filename;
   int stripe_len, stripe_count;
@@ -98,22 +105,25 @@ typedef struct {
   // this many seconds
   double min_test_time;
 
-  TYPE *buf_write, *buf_read;
+  vector<TYPE> buf_write, buf_read;
+
   int x, y;            /* index of my chunk */
   vector<int> dim_rank, my_offset, my_size;
 
   MPI_File file;
-} Params;
+};
 
 typedef struct {
   double min, max, avg, std_dev, median;
 } Stats;
 
 int getNodeCount();
+void quickRandInit(uint64_t seed);
+double quickRandDouble();
 int init(Params *opt, int argc, char **argv);
 int parseSize(const char *str, uint64_t *result);
 int autoSize(Params *p);
-void doubleSize(vector<int> &data_size);
+void doubleSize(vector<int> &v);
 int allocateBuffers(Params *p);
 bool readVector(vector<int> &v, const char *s);
 bool isVectorPositive(const vector<int> &v);
@@ -193,15 +203,26 @@ int getNodeCount() {
 }
 
 
+static uint64_t quick_rand_seed;
+void quickRandInit(uint64_t seed) {
+  quick_rand_seed = seed;
+}
+
+
+double quickRandDouble() {
+  quick_rand_seed = 2862933555777941757ULL * quick_rand_seed + 3037000493;
+  return quick_rand_seed * 1e-10;
+}
+
+
 int init(Params *p, int argc, char **argv) {
-  long argno;
+  int argno;
 
   if (argc < 4) printHelp();
 
   p->auto_size = 0;
   p->stripe_len = 4 * MB;
   p->stripe_count = 1;
-  p->buf_write = p->buf_read = NULL;
   p->min_test_time = DEFAULT_MIN_TEST_TIME;
 
   for (argno = 1; argno < argc && argv[argno][0] == '-'; argno++) {
@@ -440,9 +461,11 @@ int autoSize(Params *p) {
   }
 
   // let MPI split the dimensions by rank
-  p->rank_size.clear();
+  vector<int> tmp(p->dims, 0);
+  MPI_Dims_create(np, p->dims, &tmp[0]);
   p->rank_size.resize(p->dims, 0);
-  MPI_Dims_create(np, p->dims, &p->rank_size[0]);
+  for (int i=0; i < p->dims; i++)
+    p->rank_size[i] = tmp[i];
   
   /*if (rank == 0) {
     string s = vectorToStr(p->rank_size);
@@ -454,13 +477,13 @@ int autoSize(Params *p) {
   p->data_size = p->rank_size;
 
   // grow until the total data is at least 1 MB
-  uint64_t nbytes = sizeof(TYPE) * np;
+  long nbytes = sizeof(TYPE) * np;
   while (nbytes < (1 << 20)) {
     doubleSize(p->data_size);
-    nbytes *= 2;
+    nbytes = sizeof(TYPE) * vectorProd(p->data_size);
     if (rank==0 && PRINT_AUTOSIZE) {
-      string s = vectorToStr(p->data_size); 
-      printf("double size to %s\n", s.c_str());
+      string s = vectorToStr(p->data_size);
+      printf("double size to %s = %ld bytes\n", s.c_str(), nbytes);
     }
   }
 
@@ -476,9 +499,10 @@ int autoSize(Params *p) {
     MPI_Barrier(MPI_COMM_WORLD);
     double timer = MPI_Wtime();
     int err;
-    err = Mesh_IO_write(p->file, 0, MPITYPE, file_endian, p->buf_write, p->dims,
-                        p->my_size.data(), p->data_size.data(),
-                        p->my_offset.data(), p->my_size.data(),
+    err = Mesh_IO_write(p->file, 0, MPITYPE, file_endian,
+                        &p->buf_write[0], p->dims,
+                        &p->my_size[0], &p->data_size[0],
+                        &p->my_offset[0], &p->my_size[0],
                         &mem_start[0], MPI_ORDER_C, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
     if (err != MPI_SUCCESS) {
@@ -496,12 +520,15 @@ int autoSize(Params *p) {
     }
 
     // Don't let the data grow to more than 2 GB per process because
-    // mesh_io still doesn't handle that.
-    if (timer > p->min_test_time || nbytes >= GB * np) {
+    // mesh_io still doesn't handle that. Also, don't go past 2**30 elements
+    // in any dimension because p->data_size[] is ints, and they'll overflow.
+    if (timer > p->min_test_time
+        || nbytes >= GB * np
+        || p->data_size[0] >= GB) {
       break;
     } else {
       doubleSize(p->data_size);
-      nbytes *= 2;
+      nbytes = sizeof(TYPE) * vectorProd(p->data_size);
       if (allocateBuffers(p)) return 1;
     }
   }
@@ -516,13 +543,13 @@ void doubleSize(vector<int> &data_size) {
     if (data_size[i] < data_size[min_d])
       min_d = i;
   data_size[min_d] *= 2;
+  assert(isVectorPositive(data_size));
 }
 
 
 int allocateBuffers(Params *p) {
   double timer;
   long i, count;
-  int fail = 0;
 
   MPI_Barrier(MPI_COMM_WORLD);
   timer = MPI_Wtime();
@@ -531,7 +558,7 @@ int allocateBuffers(Params *p) {
   p->my_offset.resize(p->dims);
   p->my_size.resize(p->dims);
   p->dim_rank.resize(p->dims);
-  for (size_t dim=0; dim < p->dims; dim++) {
+  for (int dim=0; dim < p->dims; dim++) {
     int subdim_size = vectorProd(p->rank_size, dim+1);
     p->dim_rank[dim] = (rank / subdim_size) % p->rank_size[dim];
     
@@ -544,6 +571,9 @@ int allocateBuffers(Params *p) {
 
   // all processes print their coords
 #if PRINT_COORDS
+  string ds = vectorToStr(p->data_size);
+  string rs = vectorToStr(p->rank_size);
+  if (rank==0) printf("init data_size=%s rank_size=%s\n", ds.c_str(), rs.c_str());
   for (int i=0; i < np; i++) {
     if (rank == i) {
       string coord = vectorToStr(p->dim_rank),
@@ -564,38 +594,20 @@ int allocateBuffers(Params *p) {
     p->xsize = p->data_width - p->xstart;
   */
 
-  /*
-  printf("%d: %lu bytes (%d,%d) at (%d,%d) size (%d,               %d)\n",
-         rank, (long unsigned)(sizeof(TYPE) * p->ysize * p->xsize),
-         p->y, p->x, p->ystart, p->xstart,
-         p->ysize, p->xsize);
-  */
-
   /* allocate the buffer */
   count = vectorProd(p->my_size);
-  if (p->buf_write) delete[] p->buf_write;
-  p->buf_write = new TYPE[count];
-  if (p->buf_read) delete[] p->buf_read;
-  p->buf_read  = new TYPE[count];
-  if (!p->buf_write || !p->buf_read) {
-    printf("%d: failed to allocate %ld bytes\n", rank,
-           (long)(sizeof(TYPE) * count));
-    fail = 1;
-  }
-
-  /* make sure everyone succeeded */
-  if (anyFailed(fail)) {
-    if (rank == 0) printf("Some ranks failed to allocate memory; exiting.\n");
-    return 1;
-  }
+  // printf("[%d] Allocating buffers, count=%lld\n", rank, (long long)count);
+  assert(count > 0);
+  p->buf_write.resize(count, 0);
+  p->buf_read.resize(count, 0);
 
   /* fill the write buffer with random data */
-  srand(rank * 1234);
+  quickRandInit((long)rank * 1234);
   for (i=0; i < count; i++)
-    p->buf_write[i] = rand() + rand() * 1000000000.0;
+    p->buf_write[i] = quickRandDouble();
 
   /* fill the read buffer with zeros */
-  memset(p->buf_read, 0, sizeof(TYPE) * count);
+  memset(&p->buf_read[0], 0, sizeof(TYPE) * count);
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0 && PRINT_AUTOSIZE) {
@@ -696,10 +708,11 @@ void runTests(Params *p) {
     /* Write */
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
-    err = Mesh_IO_write(p->file, 0, MPITYPE, file_endian, p->buf_write, p->dims,
-                        p->my_size.data(), p->data_size.data(),
-                        p->my_offset.data(), p->my_size.data(),
-                        mem_start.data(), MPI_ORDER_C, MPI_COMM_WORLD);
+    err = Mesh_IO_write(p->file, 0, MPITYPE, file_endian,
+                        &p->buf_write[0], p->dims,
+                        &p->my_size[0], &p->data_size[0],
+                        &p->my_offset[0], &p->my_size[0],
+                        &mem_start[0], MPI_ORDER_C, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
     write_time = MPI_Wtime() - start_time;
     total_write += write_time;
@@ -709,15 +722,16 @@ void runTests(Params *p) {
       printf("%d: Mesh_IO_write error %d\n", rank, err);
 
     /* clear the read buffer */
-    memset(p->buf_read, 0, buf_size);
+    memset(&p->buf_read[0], 0, buf_size);
 
     /* Read */
     MPI_Barrier(MPI_COMM_WORLD);
     start_time = MPI_Wtime();
-    err = Mesh_IO_read(p->file, 0, MPITYPE, file_endian, p->buf_read, p->dims,
-                       p->my_size.data(), p->data_size.data(),
-                       p->my_offset.data(), p->my_size.data(),
-                       mem_start.data(), MPI_ORDER_C, MPI_COMM_WORLD);
+    err = Mesh_IO_read(p->file, 0, MPITYPE, file_endian,
+                       &p->buf_read[0], p->dims,
+                       &p->my_size[0], &p->data_size[0],
+                       &p->my_offset[0], &p->my_size[0],
+                       &mem_start[0], MPI_ORDER_C, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
     read_time = MPI_Wtime() - start_time;
     total_read += read_time;
@@ -726,7 +740,7 @@ void runTests(Params *p) {
     if (err != MPI_SUCCESS)
       printf("%d: Mesh_IO_read error %d\n", rank, err);
 
-    if (memcmp(p->buf_read, p->buf_write, buf_size))
+    if (memcmp(&p->buf_read[0], &p->buf_write[0], buf_size))
       printf("%d: data mismatch\n", rank);
 
     if (rank == 0) {
