@@ -15,7 +15,7 @@ CFLAGS=-O3
 MPICC=cc
 MPICXX=CC
 CC=cc
-LIBS=-lrt
+LIBS=-dynamic -lrt
 
 else
 
@@ -44,6 +44,9 @@ test_mesh_io: test_mesh_io.c mesh_io.o reverse_bytes.o
 	$(MPICC) $(CFLAGS) $^ $(LIBS) -o $@
 
 test_mesh_io_speed: test_mesh_io_speed.cc mesh_io.o reverse_bytes.o
+	$(MPICXX) $(CFLAGS) $^ $(LIBS) -dynamic -o $@
+
+test_mesh_io_speed_profiled: test_mesh_io_speed.cc profile_mpiio.c mesh_io.o reverse_bytes.o
 	$(MPICXX) $(CFLAGS) $^ $(LIBS) -o $@
 
 test_subarrays: test_subarrays.c
