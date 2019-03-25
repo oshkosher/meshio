@@ -10,3 +10,4 @@ test_2gb_io
 *~
 core
 *.run
+test_coll_1d
