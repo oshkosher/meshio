@@ -65,8 +65,8 @@
 #include <mpi.h>
 #include "mesh_io.h"
 
-#define MB ((long)1024*1024)
-#define GB ((long)1024*1024*1024)
+#define MB ((int64_t)1024*1024)
+#define GB ((int64_t)1024*1024*1024)
 #define DEFAULT_FILENAME "test_mesh_io_speed.tmp"
 typedef double TYPE;
 #define MPITYPE MPI_DOUBLE
@@ -108,7 +108,6 @@ struct Params {
 
   vector<TYPE> buf_write, buf_read;
 
-  int x, y;            /* index of my chunk */
   vector<int> dim_rank, my_offset, my_size;
 
   MPI_File file;
@@ -134,7 +133,6 @@ int anyFailed(int fail);
 int openFile(Params *opt);
 void runTests(Params *opt);
 void computeSpeeds(Stats *s, const vector<double> &times, double data_size_gb);
-void printFileInfo(MPI_File f);
 const char *formatLen(char buf[10], int len);
 
 
@@ -859,44 +857,6 @@ void computeSpeeds(Stats *s, const vector<double> &times, double data_size_gb) {
   } else {
     s->median = 0.5 * (speeds[(count-1)/2] + speeds[(count+1)/2]);
   }
-}
-
-
-void printFileInfo(MPI_File f) {
-  MPI_Info info;
-  char key[MPI_MAX_INFO_KEY + 1], *value;
-  int value_buf_len = 256;
-
-  value = (char*) malloc(value_buf_len);
-  assert(value);
-
-  MPI_File_get_info(f, &info);
-
-  int nkeys;
-  MPI_Info_get_nkeys(info, &nkeys);
-  for (int keyno=0; keyno < nkeys; keyno++) {
-    MPI_Info_get_nthkey(info, keyno, key);
-    int value_len, key_defined;
-    MPI_Info_get_valuelen(info, key, &value_len, &key_defined);
-    assert(key_defined);
-
-    // make sure the buffer is large enough for the value
-    if (value_len+1 > value_buf_len) {
-      value_buf_len *= 2;
-      if (value_len+1 > value_buf_len)
-        value_buf_len = value_len+1;
-      value = (char*) realloc(value, value_buf_len);
-      assert(value);
-    }
-
-    MPI_Info_get(info, key, value_buf_len-1, value, &key_defined);
-    assert(key_defined);
-
-    printf("[%d] MPI_Info \"%s\": \"%s\"\n", rank, key, value);
-  }
-  
-  MPI_Info_free(&info);
-  free(value);
 }
 
 
