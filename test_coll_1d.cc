@@ -354,7 +354,7 @@ typedef double TYPE;
 #define DEFAULT_MIN_TEST_TIME 10.0
 #define PRINT_COORDS 0
 #define PRINT_AUTOSIZE 0
-#define REMOVE_FILE 0
+#define REMOVE_FILE 1
 
 #ifdef _CRAYC
 #define PRIu64 "llu"
