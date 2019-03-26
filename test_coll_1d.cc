@@ -15,6 +15,8 @@
 #include <inttypes.h>
 #include "mesh_io.h"
 
+#define USE_INDEPENDENT_IO 0
+
 #define GB ((int64_t)1024*1024*1024)
 
 #ifdef __cplusplus
@@ -101,8 +103,14 @@ int Mesh_IO_read_1d
   buf = (void*)((char*)buf + memory_mesh_start * element_size);
   
   /* read the mesh */
-  err = MPI_File_read_at_all(fh, file_mesh_start, buf, mesh_size, etype,
-                             &status);
+  err = 
+#if USE_INDEPENDENT_IO
+MPI_File_read_at
+#else
+MPI_File_read_at_all
+#endif
+    (fh, file_mesh_start, buf, mesh_size, etype, &status);
+     
   if (err != MPI_SUCCESS) return err;
 
   /* check if data was read */
@@ -159,8 +167,14 @@ int Mesh_IO_write_1d
   buf = (void*)((char*)buf + memory_mesh_start * element_size);
   
   /* read the mesh */
-  err = MPI_File_write_at_all(fh, file_mesh_start, buf, mesh_size, etype,
-                              &status);
+  err =
+#if USE_INDEPENDENT_IO
+    MPI_File_write_at
+#else
+    MPI_File_write_at_all
+#endif
+    (fh, file_mesh_start, buf, mesh_size, etype, &status);
+     
   if (err != MPI_SUCCESS) return err;
 
   /* check if data was read */
@@ -338,8 +352,9 @@ int main(int argc, char **argv) {
 typedef double TYPE;
 #define MPITYPE MPI_DOUBLE
 #define DEFAULT_MIN_TEST_TIME 10.0
-#define PRINT_COORDS 1
-#define PRINT_AUTOSIZE 1
+#define PRINT_COORDS 0
+#define PRINT_AUTOSIZE 0
+#define REMOVE_FILE 0
 
 #ifdef _CRAYC
 #define PRIu64 "llu"
@@ -755,10 +770,16 @@ int allocateBuffers(Params *p) {
   p->buf_write.resize(p->my_size, 0);
   p->buf_read.resize(p->my_size, 0);
 
+#if 0
   /* fill the write buffer with random data */
   quickRandInit((long)rank * 1234);
   for (i=0; i < p->my_size; i++)
     p->buf_write[i] = quickRandDouble();
+#endif
+
+  /* fill the write buffer with predictable data */
+  for (i=0; i < p->my_size; i++)
+    p->buf_write[i] = i + rank * 1e-5;
 
   /* fill the read buffer with zeros */
   memset(&p->buf_read[0], 0, sizeof(TYPE) * p->my_size);
@@ -859,7 +880,10 @@ void runTests(Params *p) {
   }
 
   MPI_File_close(&p->file);
+
+#if REMOVE_FILE
   remove(p->filename);
+#endif
 }
 
 
