@@ -9,5 +9,10 @@ test_2gb_io
 *.err
 *~
 core
+core.atp*
+atpMergedBT*
 *.run
 test_coll_1d
+*.clog2
+*.zst
+foo*
