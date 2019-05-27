@@ -14,5 +14,7 @@ atpMergedBT*
 *.run
 test_coll_1d
 *.clog2
+*.slog2
 *.zst
 foo*
+check_1d_data

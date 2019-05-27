@@ -72,7 +72,12 @@ typedef double TYPE;
 #define MPITYPE MPI_DOUBLE
 #define DEFAULT_MIN_TEST_TIME 10.0
 #define PRINT_COORDS 0
-#define PRINT_AUTOSIZE 0
+#define PRINT_AUTOSIZE 1
+
+// In same cases (dims=2, np=1024, stripecount=360) the first run of each
+// test is much slower than successive runs. For accurate timing, run
+// each autosize test multiple times and only use the time of the last test.
+#define AUTOSIZE_TEST_COUNT 2
 
 #ifdef _CRAYC
 #define PRIu64 "llu"
@@ -481,7 +486,7 @@ int autoSize(Params *p) {
   while (nbytes < (1 << 20)) {
     doubleSize(p->data_size);
     nbytes = sizeof(TYPE) * vectorProd(p->data_size);
-    if (rank==0 && PRINT_AUTOSIZE) {
+    if (rank==0 && PRINT_AUTOSIZE > 1) {
       string s = vectorToStr(p->data_size);
       printf("double size to %s = %ld bytes\n", s.c_str(), nbytes);
     }
@@ -496,27 +501,34 @@ int autoSize(Params *p) {
   vector<int> mem_start(p->dims, 0);
 
   while (1) {
-    MPI_Barrier(MPI_COMM_WORLD);
-    double timer = MPI_Wtime();
-    int err;
-    err = Mesh_IO_write(p->file, 0, MPITYPE, file_endian,
-                        &p->buf_write[0], p->dims,
-                        &p->my_size[0], &p->data_size[0],
-                        &p->my_offset[0], &p->my_size[0],
-                        &mem_start[0], MPI_ORDER_C, MPI_COMM_WORLD);
-    MPI_Barrier(MPI_COMM_WORLD);
-    if (err != MPI_SUCCESS) {
-      if (rank == 0) {
-        printf("Mesh_IO_write error %d\n", err);
+    double timer = 0;
+    for (int test_iter = 0; test_iter < AUTOSIZE_TEST_COUNT; test_iter++) {
+      MPI_Barrier(MPI_COMM_WORLD);
+      timer = MPI_Wtime();
+      int err;
+      err = Mesh_IO_write(p->file, 0, MPITYPE, file_endian,
+                          &p->buf_write[0], p->dims,
+                          &p->my_size[0], &p->data_size[0],
+                          &p->my_offset[0], &p->my_size[0],
+                          &mem_start[0], MPI_ORDER_C, MPI_COMM_WORLD);
+      MPI_Barrier(MPI_COMM_WORLD);
+      if (err != MPI_SUCCESS) {
+        if (rank == 0) {
+          printf("Mesh_IO_write error %d\n", err);
+        }
+        return 1;
       }
-      return 1;
-    }
 
-    timer = MPI_Wtime() - timer;
+      timer = MPI_Wtime() - timer;
 
-    if (rank == 0 && PRINT_AUTOSIZE) {
-      string s = vectorToStr(p->data_size);
-      printf("write %s: %.3fs\n", s.c_str(), timer);
+      if (rank == 0 && PRINT_AUTOSIZE) {
+        string s = vectorToStr(p->data_size);
+        printf("%.6f autosize write %s: %.3fs\n",
+               MPI_Wtime() - t0, s.c_str(), timer);
+      }
+
+      // if any test of this size is too quick, go to the next size
+      if (timer <= p->min_test_time) break;
     }
 
     // Don't let the data grow to more than 2 GB per process because
@@ -610,7 +622,7 @@ int allocateBuffers(Params *p) {
   memset(&p->buf_read[0], 0, sizeof(TYPE) * count);
 
   MPI_Barrier(MPI_COMM_WORLD);
-  if (rank == 0 && PRINT_AUTOSIZE) {
+  if (rank == 0 && PRINT_AUTOSIZE > 1) {
     timer = MPI_Wtime() - timer;
     printf("%.6f init in %.3f sec\n", MPI_Wtime() - t0, timer);
   }
