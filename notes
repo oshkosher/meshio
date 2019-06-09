@@ -1,0 +1,5 @@
+(cd ../../Research/hdf5_perf/; make io_wrappers.so)
+
+LD_PRELOAD=../../Research/hdf5_perf/io_wrappers.so mpirun -np 4 ./test_mesh_io_speed -min_time 1 2048x2048 2x2 3 /tmp/foo
+
+clog2TOslog2 io_wrappers.clog2

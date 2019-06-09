@@ -107,6 +107,10 @@ struct Params {
   const char *filename;
   int stripe_len, stripe_count;
 
+  int warmup_barrier_count;
+  
+  int warmup_msg_size, warmup_msg_count;
+
   // when sizing the data automatically, the IO should take at least
   // this many seconds
   double min_test_time;
@@ -126,6 +130,9 @@ int getNodeCount();
 void quickRandInit(uint64_t seed);
 double quickRandDouble();
 int init(Params *opt, int argc, char **argv);
+void warmup(Params *opt);
+void computeIORanks(vector<int> &io_ranks, bool &is_io_rank, int io_rank_count);
+void sendWarmupMessages(int msg_size, int msg_count, int io_rank_count);
 int parseSize(const char *str, uint64_t *result);
 int autoSize(Params *p);
 void doubleSize(vector<int> &v);
@@ -151,6 +158,8 @@ int main(int argc, char **argv) {
   n_nodes = getNodeCount();
 
   if (init(&opt, argc, argv)) goto fail;
+
+  warmup(&opt);
 
   if (opt.auto_size) {
     if (autoSize(&opt)) goto fail;
@@ -182,6 +191,10 @@ void printHelp() {
            "      -stripe_len <n>[m] : set stripe length to <n> bytes or <n>m MiB\n"
            "      -stripe_count <n> : set stripe count\n"
            "      -min_time <sec> : minimum IO time when auto-sizing. default=%.1f\n"
+           "      -wb <count> : warm-up the communications by doing this many barrier\n"
+           "        calls before the collective IO\n"
+           "      -wc <size> <count> : warm-up the communications by having every process\n"
+           "        send <size> bytes <count> times to each of the IO processes\n"
            "  If <data> is 'auto', the size of the data is chosen automatically.\n"
            "  Starting with a small data set, the size is doubled until writing the data\n"
            "  takes at least <min_time> seconds.\n"
@@ -228,6 +241,9 @@ int init(Params *p, int argc, char **argv) {
   p->stripe_len = 4 * MB;
   p->stripe_count = 1;
   p->min_test_time = DEFAULT_MIN_TEST_TIME;
+  p->warmup_barrier_count = 0;
+  p->warmup_msg_size = 0;
+  p->warmup_msg_count = 0;
 
   for (argno = 1; argno < argc && argv[argno][0] == '-'; argno++) {
 
@@ -269,6 +285,41 @@ int init(Params *p, int argc, char **argv) {
         return 1;
       }
     }
+
+    else if (!strcmp(argv[argno], "-wc")) {
+      argno++;
+      if (argno+1 >= argc) printHelp();
+      
+      uint64_t size;
+      if (parseSize(argv[argno], &size)) {
+        if (rank==0) printf("Invalid warmup io size: \"%s\"\n", argv[argno]);
+        return 1;
+      }
+      p->warmup_msg_size = size;
+      argno++;
+
+      if (1 != sscanf(argv[argno], "%d", &p->warmup_msg_count)
+          || p->warmup_msg_count < 0) {
+        if (rank==0) printf("Invalid warmup io count: \"%s\"\n",
+                            argv[argno]);
+        return 1;
+      }
+
+      if (rank==0) printf("warmup %d x %d\n", p->warmup_msg_size, 
+                          p->warmup_msg_count);
+    }
+      
+    else if (!strcmp(argv[argno], "-wb")) {
+      argno++;
+      if (argno >= argc) printHelp();
+      if (1 != sscanf(argv[argno], "%d", &p->warmup_barrier_count)
+          || p->warmup_barrier_count < 0) {
+        if (rank==0) printf("Invalid warmup barrier count: \"%s\"\n",
+                            argv[argno]);
+        return 1;
+      }
+    }
+      
 
     else {
       if (rank==0) printf("Invalid argument: %s\n", argv[argno]);
@@ -374,6 +425,123 @@ int init(Params *p, int argc, char **argv) {
   openFile(p);
 
   return 0;
+}
+
+
+void warmup(Params *opt) {
+  if (opt->warmup_barrier_count) {
+    double timer = MPI_Wtime();
+    int i;
+    for (i=0; i < opt->warmup_barrier_count; i++) {
+      MPI_Barrier(MPI_COMM_WORLD);
+      if (rank==0) printf("%.6f barrier\n", MPI_Wtime() - t0);
+    }
+    timer = MPI_Wtime() - timer;
+    if (rank==0)
+      printf("%.6f warmup with %d barriers in %.6fs\n",
+             MPI_Wtime() - t0, opt->warmup_barrier_count, timer);
+  }
+
+  if (opt->warmup_msg_count > 0) {
+    sendWarmupMessages(opt->warmup_msg_size, opt->warmup_msg_count,
+                       opt->stripe_count);
+  }
+}
+
+
+void computeIORanks(vector<int> &io_ranks, bool &is_io_rank,
+                    int io_rank_count) {
+  int io_rank;
+
+  is_io_rank = false;
+
+  // on a multi-node machine, assign IO ranks one per node (0, 32, 64, ...)
+  // then to the next rank on each node (1, 33, 65, ...)
+  if (n_nodes > np) {
+    int cores_per_node = np / n_nodes;
+    int node_idx, thread_idx;
+    for (thread_idx = 0; thread_idx < cores_per_node; thread_idx++) {
+      for (node_idx = 0; node_idx < n_nodes; node_idx++) {
+        io_rank = node_idx * cores_per_node + thread_idx;
+        io_ranks.push_back(io_rank);
+        if (io_rank == rank) is_io_rank = true;
+        if (io_ranks.size() == io_rank_count) break;
+      }
+    }
+  }
+
+  // on a single machine, stagger IO ranks by powers of two
+  else {
+    int skip = 1, i;
+    while (io_rank_count * (skip * 2) <= np)
+      skip *= 2;
+    for (i = 0; i < io_rank_count; i++) {
+      io_rank = i * skip;
+      io_ranks.push_back(i * skip);
+      if (io_rank == rank) is_io_rank = true;
+    }
+  }
+
+  if (rank==0) {
+    printf("IO ranks:");
+    int i;
+    for (i=0; i < (int)io_ranks.size(); i++)
+      printf(" %d", io_ranks[i]);
+    printf("\n");
+  }
+}
+
+
+void sendWarmupMessages(int msg_size, int msg_count, int io_rank_count) {
+  double timer = MPI_Wtime();
+  if (io_rank_count > np)
+    io_rank_count = np;
+
+  vector<int> io_ranks;
+  int i, r;
+  bool is_io_rank;
+  char *buf = NULL;
+  MPI_Request *rqs = NULL;
+
+  computeIORanks(io_ranks, is_io_rank, io_rank_count);
+
+  buf = (char*) malloc(msg_size);
+
+  if (!is_io_rank) {
+    rqs = (MPI_Request*) malloc(sizeof(MPI_Request) * io_rank_count);
+    memset(buf, rank, msg_size);
+  }
+  
+  for (i=0; i < msg_count; i++) {
+
+    // IO ranks just receive
+    if (is_io_rank) {
+      for (r = 0; r < np - io_rank_count; r++) {
+        MPI_Status status;
+        MPI_Recv(buf, msg_size, MPI_BYTE, MPI_ANY_SOURCE,
+                 0, MPI_COMM_WORLD, &status);
+        // printf("[%d] iter=%d received from %d\n", rank, i, status.MPI_SOURCE);
+      }
+    }
+
+    // non-IO ranks send to all IO ranks
+    else {
+      for (r = 0; r < io_rank_count; r++) {
+        MPI_Isend(buf, msg_size, MPI_BYTE, io_ranks[r], 0, MPI_COMM_WORLD,
+                  &rqs[r]);
+      }
+      MPI_Waitall(io_rank_count, rqs, MPI_STATUSES_IGNORE);
+      // printf("[%d] iter=%d sent all\n", rank, i);
+    }
+  }
+
+  free(buf);
+  free(rqs);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank==0)
+    printf("%.6f %dx%d warmup messages sent in %.6fs\n", MPI_Wtime() - t0,
+           msg_size, msg_count, MPI_Wtime() - timer);
 }
 
 
