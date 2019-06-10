@@ -304,9 +304,11 @@ int init(Params *p, int argc, char **argv) {
                             argv[argno]);
         return 1;
       }
-
+      
+      /*
       if (rank==0) printf("warmup %d x %d\n", p->warmup_msg_size, 
                           p->warmup_msg_count);
+      */
     }
       
     else if (!strcmp(argv[argno], "-wb")) {
@@ -434,7 +436,7 @@ void warmup(Params *opt) {
     int i;
     for (i=0; i < opt->warmup_barrier_count; i++) {
       MPI_Barrier(MPI_COMM_WORLD);
-      if (rank==0) printf("%.6f barrier\n", MPI_Wtime() - t0);
+      // if (rank==0) printf("%.6f barrier\n", MPI_Wtime() - t0);
     }
     timer = MPI_Wtime() - timer;
     if (rank==0)
