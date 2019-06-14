@@ -493,8 +493,6 @@ double quickRandDouble() {
 int init(Params *p, int argc, char **argv) {
   int argno;
 
-  if (argc < 4) printHelp();
-
   p->auto_size = 0;
   p->stripe_len = 4 * MB;
   p->stripe_count = 1;
@@ -546,7 +544,7 @@ int init(Params *p, int argc, char **argv) {
     }
   }
 
-  if (argc - argno < 3 || argc - argno > 4) printHelp();
+  if (argc - argno < 2 || argc - argno > 3) printHelp();
 
   if (!strcmp(argv[argno], "auto")) {
     p->auto_size = 1;
