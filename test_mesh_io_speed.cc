@@ -145,7 +145,7 @@ int anyFailed(int fail);
 int openFile(Params *opt);
 void runTests(Params *opt);
 void computeSpeeds(Stats *s, const vector<double> &times, double data_size_gb);
-const char *formatLen(char buf[10], int len);
+const char *formatLen(char buf[20], int len);
 
 
 int main(int argc, char **argv) {
@@ -418,7 +418,7 @@ int init(Params *p, int argc, char **argv) {
       printf("data=%s ranks=%s\n",
              data_str.c_str(), rank_str.c_str());
     }
-    char len_str[10];
+    char len_str[20];
     printf("iters=%d, file=%s, %d x %s stripes\n",
            p->iters, p->filename, p->stripe_count,
            formatLen(len_str, p->stripe_len));
@@ -629,7 +629,7 @@ int openFile(Params *p) {
 int autoSize(Params *p) {
 
   if (rank == 0 && PRINT_AUTOSIZE) {
-    char len_str[10];
+    char len_str[20];
     printf("%.6f auto-sizing data for np=%d, nn=%d, stripe_count=%d, "
            "stripe_len=%s\n", MPI_Wtime() - t0, np, n_nodes,
            p->stripe_count, formatLen(len_str, p->stripe_len));
@@ -1042,7 +1042,7 @@ void computeSpeeds(Stats *s, const vector<double> &times, double data_size_gb) {
 }
 
 
-const char *formatLen(char buf[10], int len) {
+const char *formatLen(char buf[20], int len) {
   if (len <= 0) {
     sprintf(buf, "%d", len);
   } else if ((len % MB) == 0) {
